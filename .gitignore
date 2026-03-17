@@ -33,6 +33,14 @@ Thumbs.db
 logs/
 output/
 intents/
+temp/
+
+# Output directories（新架构）
+output/trajectories/
+output/middle_format/
+output/progress/
+output/logs/
+output/tools/
 
 # Temporary files
 *.log
@@ -44,8 +52,24 @@ helpme_docs/
 
 # Claude files
 claude_files/
-.claude
+.claude/
 
 # Config files with sensitive data
 src/config.py
+config/config.yaml        # 用户配置文件（可能包含 API Key）
+.env                      # 环境变量文件
+
+# 测试文件和目录
+test_*.py
+test_*/
+*.pytest_cache/
+.coverage
+htmlcov/
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+*.ipynb
+
+# Archive（旧版本代码）
+archive/
 

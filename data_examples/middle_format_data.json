@@ -1,0 +1,103 @@
+{
+    "status": "completed",
+    "session_id": "00018217-0099-4804-a3a5-c376fb81d6e8",
+    "intent": "",
+    "total_steps": 7,
+    "final_output": "xxx",
+    "enable_thinking": true,
+    "messages": [
+        {
+            "role": "system",
+            "content": "\nYou are an expert in searching the web by composing functions...."
+        },
+        {
+            "role": "user",
+            "content": "In biology what are Retzius lines?\n\n"
+        },
+        {
+            "role": "assistant",
+            "content": "\n",
+            "refusal": null,
+            "annotations": null,
+            "audio": null,
+            "function_call": null,
+            "tool_calls": [
+                {
+                    "id": "chatcmpl-tool-8ed4bf69614b4aceb26dc17d785863f4",
+                    "type": "function",
+                    "function": {
+                        "name": "search_engine_query",
+                        "arguments": "{\"keywords\": \"Retzius lines biology\", \"max_results\": 10}"
+                    }
+                }
+            ],
+            "reasoning_content": "The user is asking about \"Retzius lines\" ..."
+        },
+        {
+            "role": "tool",
+            "name": "search_engine_query",
+            "tool_call_id": "chatcmpl-tool-8ed4bf69614b4aceb26dc17d785863f4",
+            "content": "工具执行结果",
+            "success": true
+        },
+        {
+            "role": "assistant",
+            "content": "\n{'answer': 'Retzius lines ...'}",
+            "refusal": null,
+            "annotations": null,
+            "audio": null,
+            "function_call": null,
+            "tool_calls": [],
+            "reasoning_content": "Perfect! I found..."
+        }
+    ],
+    "tools": [
+        {
+            "type": "function",
+            "function": {
+                "name": "search_engine_query",
+                "description": "xxx",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "keywords": {
+                            "type": "string",
+                            "description": "The keywords to search for."
+                        },
+                        "max_results": {
+                            "type": "integer",
+                            "description": "The maximum number of search results to return.",
+                            "default": 10
+                        },
+                        "region": {
+                            "type": "string",
+                            "description": "The region to search in, e.g., 'US', 'CN'."
+                        },
+                        "required": [
+                            "keywords"
+                        ]
+                    }
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "fetch_web_url_content",
+                "description": "Fetches the content of a web URL.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "url": {
+                            "type": "string",
+                            "description": "The URL to fetch content from."
+                        }
+                    },
+                    "required": [
+                        "url"
+                    ]
+                }
+            }
+        }
+    ]
+}

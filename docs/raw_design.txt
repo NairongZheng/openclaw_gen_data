@@ -1,0 +1,14 @@
+
+
+本项目框架设计于用来与 openclaw 交互生成 trajectory，用于后续 LLM 的 SFT 训练。
+
+大概的思路是：
+1. 拿到 user intent，我放了一个例子在 data_examples/intents.jsonl，其中 natural_language_intent 这个字段就是需要的 user intent
+2. user loop 根据拿到的 intent 将其拆解成单句 query 与 openclaw 进行交互，根据当前交互的结果与进度，不断循环，直到认为 intent 被完全执行了
+3. 因为数据量比较多，所以需要用并发的方式来跑，intent 比较多，中途也有可能出现网络问题或者 openclaw 服务问题，所以希望能有进度文件之类的 resume 的方式来确保断点重连
+4. 除了主体的框架之外，还想要有后处理的脚本，将 openclaw 的 trajectory 进行转换，成我们的中间格式数据，例子在 data_examples/middle_format_data.json
+
+其中比较关键的部分就是 openclaw 那边，包括：
+1. 如何与 openclaw 连接？openclaw 是我部署在本地 127.0.0.1:60012（ip, port可能会变）的一个服务
+2. 并发请求的话，需要新建的是 session 还是 agent？
+3. 在交互的时候需要先提取 openclaw 所有的可用工具，并且在 trajectory 生成之后进行保存

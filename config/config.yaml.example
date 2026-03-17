@@ -1,0 +1,100 @@
+# OpenClaw 数据生成项目配置文件
+# 使用方法: cp config/config.yaml.example config/config.yaml
+# 然后修改 config.yaml 中的配置项
+
+# ============== OpenClaw 配置 ==============
+openclaw:
+  # OpenClaw HTTP API 地址
+  base_url: "http://127.0.0.1:60012"
+  
+  # API Key（如果需要的话）
+  # 支持环境变量: ${OPENCLAW_API_KEY}
+  api_key: ""
+  
+  # 请求超时时间（秒）
+  timeout: 60
+  
+  # 最大重试次数
+  max_retries: 3
+
+# ============== LLM API 配置 ==============
+llm:
+  # LLM API 基础URL
+  # 示例: Azure OpenAI: "https://your-resource.openai.azure.com"
+  # 示例: DeepSeek: "https://api.deepseek.com"
+  base_url: "${LLM_BASE_URL}"
+  
+  # API Key（建议使用环境变量）
+  api_key: "${LLM_API_KEY}"
+  
+  # 模型名称
+  model: "gpt-4o-2024-11-20"
+  
+  # 温度参数（控制随机性，0-2）
+  temperature: 0.7
+  
+  # 最大生成 token 数
+  max_tokens: 4000
+  
+  # 请求超时时间（秒）
+  timeout: 120
+
+# ============== 生成配置 ==============
+generation:
+  # 最大交互轮次（User Loop 的最大循环次数）
+  max_turns: 20
+  
+  # 并发数（同时处理的 intent 数量）
+  concurrent_workers: 5
+  
+  # 是否重试失败的 intent
+  retry_failed: true
+  
+  # 最大重试次数
+  max_retries: 3
+  
+  # 轮次间延迟（秒，避免 API 限流）
+  inter_turn_delay: 0.5
+
+# ============== 路径配置 ==============
+paths:
+  # Intent 数据文件路径
+  intents_file: "data_examples/intents.jsonl"
+  
+  # 输出根目录
+  output_dir: "output"
+  
+  # Trajectory 输出目录
+  trajectories_dir: "output/trajectories"
+  
+  # 中间格式输出目录
+  middle_format_dir: "output/middle_format"
+  
+  # 进度文件目录
+  progress_dir: "output/progress"
+  
+  # 日志目录
+  logs_dir: "output/logs"
+  
+  # 工具 schema 缓存目录
+  tools_dir: "output/tools"
+
+# ============== 日志配置 ==============
+logging:
+  # 日志级别: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  level: "INFO"
+  
+  # 日志格式
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  
+  # 日志文件路径
+  file: "output/logs/app.log"
+  
+  # 是否同时输出到控制台
+  console: true
+  
+  # 日志文件最大大小（MB）
+  max_file_size: 10
+  
+  # 保留的日志文件数量
+  backup_count: 5

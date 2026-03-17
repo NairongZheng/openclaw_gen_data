@@ -1,0 +1,21 @@
+openclaw:
+  base_agent: "main"
+  num_workers: 1
+
+llm:
+  base_url: "http://10.210.9.11:33312/v1"
+  api_key: "xxx"
+  model: "qwen3.5-35b-a3b"
+  temperature: 0.7
+
+generation:
+  max_turns: 20
+  timeout: 600
+
+paths:
+  intents_file: "data_examples/intents.jsonl"
+  output_dir: "output"
+  sessions_dir: "output/sessions"
+  middle_format_dir: "output/middle_format"
+  progress_file: "output/progress.json"
+  logs_dir: "output/logs"
