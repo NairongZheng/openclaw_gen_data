@@ -10,6 +10,9 @@ openclaw:
   # worker agent 前缀，例如 gendata-worker-1 ~ gendata-worker-30
   worker_prefix: "gendata-worker"
 
+  # 每个 worker 独立 workspace 的根目录；最终会使用 <workspace_root>/<agent_id>
+  workspace_root: "~/.openclaw/workspaces"
+
   # 默认并发 worker 数
   num_workers: 5
 

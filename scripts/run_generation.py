@@ -273,11 +273,17 @@ def main():
 
     num_workers = args.concurrent or config["openclaw"]["num_workers"]
     worker_prefix = config["openclaw"].get("worker_prefix", "gendata-worker")
-    ensure_result = ensure_agents(num_agents=num_workers, worker_prefix=worker_prefix)
+    workspace_root = config["openclaw"].get("workspace_root")
+    ensure_result = ensure_agents(
+        num_agents=num_workers,
+        worker_prefix=worker_prefix,
+        workspace_root=workspace_root,
+    )
     logger.info(
-        "worker agents 就绪，已存在 %s 个，新建 %s 个",
+        "worker agents 就绪，已存在 %s 个，新建 %s 个，重建 %s 个",
         len(ensure_result["existing"]),
         len(ensure_result["created"]),
+        len(ensure_result["recreated"]),
     )
 
     project_root = Path(__file__).resolve().parent.parent

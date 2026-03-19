@@ -1,7 +1,8 @@
 openclaw:
   base_agent: "main"
   worker_prefix: "gendata-worker"
-  num_workers: 1
+  workspace_root: "~/.openclaw/workspaces"
+  num_workers: 3
   thinking: "off"
 
 llm:

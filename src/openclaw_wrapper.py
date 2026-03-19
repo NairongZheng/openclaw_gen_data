@@ -40,23 +40,58 @@ def list_agents() -> List[Dict[str, Any]]:
     return _extract_json_payload(result.stdout)
 
 
+def resolve_workspace_root(workspace_root: Optional[str] = None) -> Path:
+    """解析 worker workspaces 的根目录。"""
+    return Path(workspace_root).expanduser() if workspace_root else Path.home() / ".openclaw" / "workspaces"
+
+
+def expected_agent_workspace(agent_id: str, workspace_root: Optional[str] = None) -> Path:
+    """获取指定 agent 的预期隔离 workspace 路径。"""
+    return resolve_workspace_root(workspace_root) / agent_id
+
+
 def ensure_agents(
     num_agents: int,
     worker_prefix: str = "gendata-worker",
-    workspace_dir: Optional[str] = None,
+    workspace_root: Optional[str] = None,
+    recreate_mismatched: bool = False,
 ) -> Dict[str, List[str]]:
-    """确保所需数量的 worker agents 存在。"""
-    existing_agents = {agent["id"] for agent in list_agents()}
-    workspace = workspace_dir or str(Path.home() / ".openclaw/workspace")
+    """确保所需数量的 worker agents 存在并使用独立 workspace。"""
+    existing_agents = {agent["id"]: agent for agent in list_agents()}
+    root_dir = resolve_workspace_root(workspace_root)
+    root_dir.mkdir(parents=True, exist_ok=True)
 
     created: List[str] = []
     existing: List[str] = []
+    recreated: List[str] = []
+    mismatched: List[str] = []
 
     for index in range(1, num_agents + 1):
         agent_id = f"{worker_prefix}-{index}"
-        if agent_id in existing_agents:
-            existing.append(agent_id)
-            continue
+        desired_workspace = expected_agent_workspace(agent_id, str(root_dir))
+        desired_workspace.mkdir(parents=True, exist_ok=True)
+
+        existing_agent = existing_agents.get(agent_id)
+        if existing_agent:
+            current_workspace = existing_agent.get("workspace")
+            if current_workspace == str(desired_workspace):
+                existing.append(agent_id)
+                continue
+
+            if not recreate_mismatched:
+                mismatched.append(
+                    f"{agent_id} (current: {current_workspace}, expected: {desired_workspace})"
+                )
+                continue
+
+            delete_result = subprocess.run(
+                ["openclaw", "agents", "delete", agent_id, "--force", "--json"],
+                capture_output=True,
+                text=True,
+            )
+            if delete_result.returncode != 0:
+                raise RuntimeError(f"Failed to delete agent {agent_id}: {delete_result.stderr}")
+            recreated.append(agent_id)
 
         cmd = [
             "openclaw",
@@ -65,15 +100,24 @@ def ensure_agents(
             agent_id,
             "--non-interactive",
             "--workspace",
-            workspace,
+            str(desired_workspace),
             "--json",
         ]
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
             raise RuntimeError(f"Failed to create agent {agent_id}: {result.stderr}")
+        if agent_id in recreated:
+            continue
         created.append(agent_id)
 
-    return {"created": created, "existing": existing}
+    if mismatched:
+        raise RuntimeError(
+            "Found agents using shared or unexpected workspaces. "
+            "Re-run init with recreate enabled or delete them manually: "
+            + "; ".join(mismatched)
+        )
+
+    return {"created": created, "existing": existing, "recreated": recreated}
 
 
 class OpenClawWrapper:

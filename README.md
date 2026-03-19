@@ -18,6 +18,7 @@
 
 - 单一入口脚本：[scripts/run_generation.py](scripts/run_generation.py)
 - worker-agent 绑定模型：多个 worker 并发，同一个 worker 内串行复用 agent
+- 独立 workspace：每个 worker agent 使用自己的隔离 workspace，避免文件操作互相冲突
 - 自动 resume：基于 [output/progress.json](output/progress.json) 跳过已成功 intent
 - 自动 tools catalog：优先读取缓存，不存在时自动生成
 - 自动 session 归档：每条 intent 的原始 session 会保存到 [output/sessions](output/sessions)
@@ -79,6 +80,7 @@ cp config/config.yaml.example config/config.yaml
 openclaw:
   base_agent: "main"
   worker_prefix: "gendata-worker"
+  workspace_root: "~/.openclaw/workspaces"
   num_workers: 30
   thinking: "off"
 
@@ -105,6 +107,7 @@ paths:
 配置说明：
 
 - `openclaw.worker_prefix`：worker agent 前缀，例如 `gendata-worker-1`
+- `openclaw.workspace_root`：worker 独立 workspace 根目录，每个 agent 会使用 `<workspace_root>/<agent_id>`
 - `openclaw.num_workers`：默认并发 worker 数
 - `openclaw.thinking`：OpenClaw thinking 级别
 - `generation.max_turns`：保险轮次，避免死循环
@@ -119,6 +122,12 @@ paths:
 
 ```bash
 python scripts/init_agents.py --num-agents 30
+```
+
+如果你已经创建过共享 workspace 的 agents，需要按隔离目录重建：
+
+```bash
+python scripts/init_agents.py --num-agents 30 --recreate-mismatched
 ```
 
 ### 2. 正式运行
@@ -159,11 +168,12 @@ python scripts/run_generation.py --concurrent 30 --refresh-tools
 
 1. 读取配置
 2. 确保 worker agents 存在
-3. 加载或生成完整 tools catalog
-4. 读取 intents
-5. 根据 progress 文件过滤已完成任务
-6. 每个 worker 绑定一个固定 agent，并发消费 intent 队列
-7. 对每条 intent：
+3. 检查这些 agents 是否使用隔离 workspace
+4. 加载或生成完整 tools catalog
+5. 读取 intents
+6. 根据 progress 文件过滤已完成任务
+7. 每个 worker 绑定一个固定 agent，并发消费 intent 队列
+8. 对每条 intent：
    - reset 当前 agent 的 main session
    - 调用 LLM 生成下一条 query
    - 调用 OpenClaw 执行一轮交互
@@ -258,7 +268,13 @@ python scripts/run_generation.py --concurrent 30 --refresh-tools
 
 在当前环境中，`openclaw agent --session-id ...` 并不会稳定切换到指定 session，因此项目采用“worker main session + 显式 reset”的方式管理会话。
 
-### 2. 为什么 tools 有时不完整
+### 2. 为什么每个 agent 必须使用独立 workspace
+
+因为多个 agent 可能执行文件读写、生成脚本、落临时文件或修改相对路径下的内容。共用 workspace 时，这些行为会互相覆盖或污染结果。
+
+当前实现会要求每个 worker agent 使用独立目录；如果发现已有 agent 仍然指向共享 workspace，主流程会直接报错，避免在不安全状态下运行。
+
+### 3. 为什么 tools 有时不完整
 
 原因通常有三种：
 
@@ -272,7 +288,7 @@ python scripts/run_generation.py --concurrent 30 --refresh-tools
 python scripts/run_generation.py --refresh-tools --limit 1
 ```
 
-### 3. 为什么可以直接 resume
+### 4. 为什么可以直接 resume
 
 因为 [output/progress.json](output/progress.json) 会记录已完成 intent；再次运行时会自动过滤成功项。
 
