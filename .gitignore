@@ -1,27 +1,33 @@
-# Python
+# Python cache and build artifacts
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-*.egg-info/
-dist/
 build/
+dist/
+*.egg-info/
 *.egg
 
-# Virtual Environment
+# Virtual environments
+.venv/
 venv/
 env/
 ENV/
 
-# IDE
+# Test and coverage artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE and editor files
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# OS
+# OS files
 .DS_Store
 .DS_Store?
 ._*
@@ -29,47 +35,22 @@ ENV/
 .Trashes
 Thumbs.db
 
-# Test outputs
-logs/
+# Runtime outputs
 output/
-intents/
+logs/
 temp/
 
-# Output directories（新架构）
-output/trajectories/
-output/middle_format/
-output/progress/
-output/logs/
-output/tools/
+# Local secrets and user-specific config
+.env
+config/config.yaml
 
-# Temporary files
-*.log
-*.tmp
-*.bak
-
-# Documentation and helper files
-helpme_docs/
-
-# Claude files
-claude_files/
+# Local helper directories
 .claude/
+claude_files/
+helpme_docs/
+archive/
 
-# Config files with sensitive data
-src/config.py
-config/config.yaml        # 用户配置文件（可能包含 API Key）
-.env                      # 环境变量文件
-
-# 测试文件和目录
-test_*.py
-test_*/
-*.pytest_cache/
-.coverage
-htmlcov/
-
-# Jupyter Notebook
+# Notebook artifacts
 .ipynb_checkpoints/
 *.ipynb
-
-# Archive（旧版本代码）
-archive/
 
