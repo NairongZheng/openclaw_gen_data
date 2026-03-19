@@ -53,19 +53,11 @@ class LLMClient:
         # 构建 messages
         messages = [{"role": "system", "content": system_prompt}]
 
-        # 添加对话历史
-        if conversation_history:
-            messages.extend(conversation_history)
-            messages.append({
-                "role": "user",
-                "content": "请分析上述对话，判断用户意图是否已完成。如果完成，返回 completed=true；否则生成下一个合理的 query。"
-            })
-        else:
-            # 首次生成
-            messages.append({
-                "role": "user",
-                "content": "请生成第一个 query 来开始实现用户意图。"
-            })
+        messages.extend(conversation_history)
+        messages.append({
+            "role": "user",
+            "content": "请基于当前 intent 与完整历史，判断任务是否已经完成；如果未完成，就生成下一条最合适的用户 query。"
+        })
 
         # 调用 LLM
         try:
@@ -104,10 +96,9 @@ class LLMClient:
 - 偏好风格：{persona.get('communication_style', 'unknown')}
 
 你的任务：
-1. 如果对话历史为空，生成第一个 query 来启动任务
-2. 如果有对话历史，分析最新的 AI 响应：
-   - 如果任务已完成（代码已实现、问题已解决），返回 completed=true
-   - 如果需要继续（需要确认、需要更多信息、需要下一步），生成下一个 query
+1. 分析当前 intent 与已有对话历史，判断任务是否真的完成
+2. 如果任务已完成（代码已实现、问题已解决），返回 completed=true
+3. 如果需要继续（需要确认、需要更多信息、需要下一步），生成下一个 query
 
 返回 JSON 格式：
 {{

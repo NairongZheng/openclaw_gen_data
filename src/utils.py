@@ -2,7 +2,7 @@
 import json
 import logging
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any
 
 
 def setup_logging(log_dir: str = "output/logs", level: int = logging.INFO):
@@ -35,3 +35,8 @@ def load_json(filepath: str) -> Any:
     """加载 JSON 文件"""
     with open(filepath, 'r', encoding='utf-8') as f:
         return json.load(f)
+
+
+def ensure_dir(path: str) -> None:
+    """确保目录存在。"""
+    Path(path).mkdir(parents=True, exist_ok=True)

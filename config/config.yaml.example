@@ -4,18 +4,17 @@
 
 # ============== OpenClaw 配置 ==============
 openclaw:
-  # OpenClaw HTTP API 地址
-  base_url: "http://127.0.0.1:60012"
-  
-  # API Key（如果需要的话）
-  # 支持环境变量: ${OPENCLAW_API_KEY}
-  api_key: ""
-  
-  # 请求超时时间（秒）
-  timeout: 60
-  
-  # 最大重试次数
-  max_retries: 3
+  # 仅用于说明默认主 agent，实际生成使用 worker_prefix + 序号
+  base_agent: "main"
+
+  # worker agent 前缀，例如 gendata-worker-1 ~ gendata-worker-30
+  worker_prefix: "gendata-worker"
+
+  # 默认并发 worker 数
+  num_workers: 5
+
+  # OpenClaw thinking 级别，可选 off|minimal|low|medium|high|xhigh
+  thinking: "off"
 
 # ============== LLM API 配置 ==============
 llm:
@@ -41,20 +40,11 @@ llm:
 
 # ============== 生成配置 ==============
 generation:
-  # 最大交互轮次（User Loop 的最大循环次数）
+  # 最大交互轮次（保险丝，避免 User Loop 死循环）
   max_turns: 20
-  
-  # 并发数（同时处理的 intent 数量）
-  concurrent_workers: 5
-  
-  # 是否重试失败的 intent
-  retry_failed: true
-  
-  # 最大重试次数
-  max_retries: 3
-  
-  # 轮次间延迟（秒，避免 API 限流）
-  inter_turn_delay: 0.5
+
+  # 单次 OpenClaw 交互超时（秒）
+  timeout: 600
 
 # ============== 路径配置 ==============
 paths:
@@ -64,37 +54,17 @@ paths:
   # 输出根目录
   output_dir: "output"
   
-  # Trajectory 输出目录
-  trajectories_dir: "output/trajectories"
+  # 归档后的 session jsonl 输出目录
+  sessions_dir: "output/sessions"
   
   # 中间格式输出目录
   middle_format_dir: "output/middle_format"
   
-  # 进度文件目录
-  progress_dir: "output/progress"
+  # 进度文件
+  progress_file: "output/progress.json"
   
   # 日志目录
   logs_dir: "output/logs"
   
-  # 工具 schema 缓存目录
-  tools_dir: "output/tools"
-
-# ============== 日志配置 ==============
-logging:
-  # 日志级别: DEBUG, INFO, WARNING, ERROR, CRITICAL
-  level: "INFO"
-  
-  # 日志格式
-  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-  
-  # 日志文件路径
-  file: "output/logs/app.log"
-  
-  # 是否同时输出到控制台
-  console: true
-  
-  # 日志文件最大大小（MB）
-  max_file_size: 10
-  
-  # 保留的日志文件数量
-  backup_count: 5
+  # 工具 catalog 缓存文件；主流程会优先读取，没有时自动调用 tools/fetch_tools/dump_tools.mjs 生成
+  tools_cache_file: "output/tools/openclaw_all_tools.json"

@@ -19,7 +19,11 @@ class DataConverter:
         self,
         session_file: str,
         intent_data: Dict[str, Any],
-        output_file: str
+        output_file: str,
+        tools_catalog: List[Dict[str, Any]] = None,
+        available_tool_entries: List[Dict[str, Any]] = None,
+        skills: List[Dict[str, Any]] = None,
+        session_metadata: Dict[str, Any] = None,
     ) -> Dict[str, Any]:
         """将 session 文件转换为 middle format（OpenAI 完整格式）
 
@@ -51,10 +55,14 @@ class DataConverter:
             "total_steps": self._count_tool_calls(messages),
             "enable_thinking": True,
             "messages": self._extract_messages_openai_format(messages),
-            "tools": self._extract_tools(messages),
+            "tools": self._extract_tools(messages, tools_catalog, available_tool_entries),
+            "skills": skills or [],
             "final_output": self._extract_final_output(messages),
             "intent_id": intent_data.get("id"),
-            "metadata": intent_data.get("metadata", {})
+            "metadata": {
+                **intent_data.get("metadata", {}),
+                "session": session_metadata or {},
+            },
         }
 
         Path(output_file).parent.mkdir(parents=True, exist_ok=True)
@@ -116,7 +124,8 @@ class DataConverter:
                     "role": "tool",
                     "name": tool_result["name"],
                     "tool_call_id": tool_result["tool_call_id"],
-                    "content": tool_result["content"]
+                    "content": tool_result["content"],
+                    "success": tool_result["success"],
                 })
 
         return openai_messages
@@ -128,10 +137,15 @@ class DataConverter:
                 return item.get("text", "")
         return ""
 
-    def _extract_tools(self, messages: List[Dict]) -> List[Dict[str, Any]]:
-        """从 session 中提取工具定义"""
+    def _extract_tools(
+        self,
+        messages: List[Dict],
+        tools_catalog: List[Dict[str, Any]] = None,
+        available_tool_entries: List[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """提取工具定义。优先使用预生成 catalog，否则退回 session 元数据 + 实际调用参数。"""
         tool_names = set()
-        tool_schemas = {}
+        tool_schemas: Dict[str, Dict[str, Any]] = {}
 
         for msg_obj in messages:
             msg = msg_obj.get("message", {})
@@ -143,16 +157,44 @@ class DataConverter:
                     if name not in tool_schemas:
                         tool_schemas[name] = tc.get("arguments", {})
 
+        available_entries = available_tool_entries or []
+        available_names = [entry.get("name") for entry in available_entries if entry.get("name")]
+
+        if tools_catalog:
+            if available_names:
+                filtered_catalog = [
+                    tool for tool in tools_catalog
+                    if tool.get("function", {}).get("name") in set(available_names)
+                ]
+            else:
+                filtered_catalog = list(tools_catalog)
+
+            catalog_names = {tool.get("function", {}).get("name") for tool in filtered_catalog}
+            missing_names = [name for name in sorted(tool_names) if name not in catalog_names]
+            fallback_tools = [self._build_fallback_tool(name, tool_schemas.get(name, {})) for name in missing_names]
+            return filtered_catalog + fallback_tools
+
         tools = []
-        for name in sorted(tool_names):
+        merged_names = []
+        seen_names = set()
+        for name in available_names + sorted(tool_names):
+            if name and name not in seen_names:
+                merged_names.append(name)
+                seen_names.add(name)
+
+        entry_by_name = {entry.get("name"): entry for entry in available_entries if entry.get("name")}
+        for name in merged_names:
+            entry = entry_by_name.get(name, {})
+            observed_arguments = tool_schemas.get(name, {})
+            description = self._build_available_tool_description(name, entry, observed_arguments)
             tools.append({
                 "type": "function",
                 "function": {
                     "name": name,
-                    "description": f"Tool: {name}",
+                    "description": description,
                     "parameters": {
                         "type": "object",
-                        "properties": tool_schemas.get(name, {}),
+                        "properties": self._to_json_schema_properties(observed_arguments),
                         "required": []
                     }
                 }
@@ -177,3 +219,55 @@ class DataConverter:
             if msg.get("role") == "assistant":
                 return self.parser.extract_text_from_content(msg.get("content", []))
         return ""
+
+    def _to_json_schema_properties(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """将一次工具调用的参数样本转换为兜底 JSON Schema。"""
+        properties: Dict[str, Any] = {}
+        for key, value in arguments.items():
+            if isinstance(value, bool):
+                value_type = "boolean"
+            elif isinstance(value, int):
+                value_type = "integer"
+            elif isinstance(value, float):
+                value_type = "number"
+            elif isinstance(value, list):
+                value_type = "array"
+            elif isinstance(value, dict):
+                value_type = "object"
+            else:
+                value_type = "string"
+
+            properties[key] = {
+                "type": value_type,
+                "description": f"Observed argument for {key}",
+            }
+        return properties
+
+    def _build_fallback_tool(self, name: str, observed_arguments: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": f"Available tool: {name}",
+                "parameters": {
+                    "type": "object",
+                    "properties": self._to_json_schema_properties(observed_arguments),
+                    "required": [],
+                },
+            },
+        }
+
+    def _build_available_tool_description(
+        self,
+        name: str,
+        entry: Dict[str, Any],
+        observed_arguments: Dict[str, Any],
+    ) -> str:
+        if observed_arguments:
+            return f"Available tool: {name}. Parameter schema inferred from observed calls."
+
+        properties_count = entry.get("propertiesCount")
+        if properties_count is not None:
+            return f"Available tool: {name}. OpenClaw reported {properties_count} parameter fields."
+
+        return f"Available tool: {name}"

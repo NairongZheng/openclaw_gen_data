@@ -46,6 +46,9 @@ if response.get("result", {}).get("payloads"):
 
 # TODO
 
-1. 一开始就清空 agent session
-2. 清空的时候是否session 的jsonl文件也会被清空呢？或者会新建？
-3. 这边的方案是不是应该改成一开始清空session并且拿到session-id，这样比较符合逻辑，从第一次返回拿id感觉不对
+当前项目叫 openclaw_gen_data，预期的设计在：docs/raw_design.txt，总结下来就是传入 user intent，经过 user loop 与 openclaw 交互之后，保存完整的轨迹。
+
+目前基本框架跟大部分功能都已经完成了，还需要进行以下优化：
+1. 当前 session 管理有点问题，应该是先清空，然后再进行交互，交互完再进行清空
+2. 最终结果需要保存一个 tools 字段跟一个 skills 字段，需要提取
+3. 与 openclaw 的交互好像除了用命令行的方式，也可以直接用网管走 http 或者 websocket？请你看看哪种方式最好

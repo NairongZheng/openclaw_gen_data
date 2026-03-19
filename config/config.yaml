@@ -1,6 +1,8 @@
 openclaw:
   base_agent: "main"
+  worker_prefix: "gendata-worker"
   num_workers: 1
+  thinking: "off"
 
 llm:
   base_url: "http://10.210.9.11:33312/v1"
@@ -9,7 +11,7 @@ llm:
   temperature: 0.7
 
 generation:
-  max_turns: 20
+  max_turns: 2
   timeout: 600
 
 paths:
@@ -19,3 +21,4 @@ paths:
   middle_format_dir: "output/middle_format"
   progress_file: "output/progress.json"
   logs_dir: "output/logs"
+  tools_cache_file: "output/tools/openclaw_all_tools.json"

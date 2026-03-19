@@ -1,261 +1,296 @@
-# OpenClaw 数据生成项目
+# OpenClaw Gen Data
 
-> 通过与 OpenClaw HTTP API 交互生成高质量的 trajectory 数据，用于 LLM SFT 训练
+基于本地 OpenClaw agent 自动生成 trajectory 数据，并转换为训练使用的 middle format。
 
-**版本**: v4.0.0（重构版本）  
-**状态**: 🚧 开发中（阶段1已完成：基础设施）
+## 项目简介
 
----
+这个项目的目标是：
 
-## 项目概述
+- 从 [data_examples/intents.jsonl](data_examples/intents.jsonl) 读取 user intent
+- 使用 user loop 持续与 OpenClaw 交互，直到任务完成或达到保险轮次
+- 保存完整 session 轨迹
+- 转换为训练中间格式，参考 [data_examples/middle_format_data.json](data_examples/middle_format_data.json)
+- 支持并发执行与断点续跑
 
-本项目用于自动化生成 OpenClaw trajectory 数据，核心流程包括：
-
-1. **Intent 驱动**: 从 `intents.jsonl` 读取用户意图
-2. **User Loop**: 使用 LLM 将 intent 拆解成多轮 query，与 OpenClaw 循环交互
-3. **并发与断点续传**: 支持多 session 并发，通过进度文件实现断点续传
-4. **后处理转换**: 将 OpenClaw trajectory 转换为标准的 middle_format.json
+当前实现基于 OpenClaw CLI 和本地 session 文件，而不是直接依赖 HTTP API。
 
 ## 核心特性
 
-- ✅ **配置驱动**: 使用 YAML 配置文件，支持环境变量
-- ✅ **模块化设计**: 按功能分包（connectors, core, processors, utils）
-- ✅ **完善的日志**: 支持文件和控制台输出，敏感信息自动脱敏
-- ✅ **数据验证**: 使用 Pydantic 进行严格的类型检查和数据验证
-- 🚧 **并发处理**: 多 session 并发生成（开发中）
-- 🚧 **断点续传**: 进度跟踪，支持网络/服务中断恢复（开发中）
+- 单一入口脚本：[scripts/run_generation.py](scripts/run_generation.py)
+- worker-agent 绑定模型：多个 worker 并发，同一个 worker 内串行复用 agent
+- 自动 resume：基于 [output/progress.json](output/progress.json) 跳过已成功 intent
+- 自动 tools catalog：优先读取缓存，不存在时自动生成
+- 自动 session 归档：每条 intent 的原始 session 会保存到 [output/sessions](output/sessions)
+- middle format 转换：输出到 [output/middle_format](output/middle_format)
 
-## 项目结构
+## 目录结构
 
-```
-openclaw_gen_data/
-├── README.md                    # 项目文档
-├── requirements.txt             # Python依赖
-├── setup.py                     # 项目配置
-│
-├── docs/                        # 文档目录
-│   ├── raw_design.txt          # 原始设计思路
-│   ├── plan.md                 # 开发计划和架构设计
-│   ├── installation.md         # 安装指南（待创建）
-│   └── usage.md                # 使用指南（待创建）
-│
-├── data_examples/               # 示例数据
-│   ├── intents.jsonl           # Intent示例
-│   └── middle_format_data.json # 中间格式示例
-│
-├── config/                      # 配置目录
-│   └── config.yaml.example     # 配置模板
-│
-├── scripts/                     # 主运行脚本（待创建）
-│   ├── run_generation.py       # Part 1: Intent驱动的生成
-│   ├── run_conversion.py       # Part 2: Trajectory转换
-│   └── resume_generation.py    # 断点续传脚本
-│
-├── src/openclaw_gen/            # 核心模块包
-│   ├── __init__.py
-│   ├── config.py               # 配置管理 ✅
-│   ├── logging_config.py       # 日志配置 ✅
-│   ├── models.py               # 数据模型定义 ✅
-│   │
-│   ├── connectors/             # 连接器模块（待实现）
-│   │   ├── openclaw_client.py  # OpenClaw HTTP API客户端
-│   │   └── llm_client.py       # LLM API客户端
-│   │
-│   ├── core/                   # 核心逻辑（待实现）
-│   │   ├── intent_loader.py    # Intent数据加载器
-│   │   ├── user_loop.py        # User Loop
-│   │   ├── trajectory_manager.py # Trajectory管理器
-│   │   └── progress_tracker.py # 进度跟踪
-│   │
-│   ├── processors/             # 数据处理（待实现）
-│   │   ├── trajectory_parser.py # Trajectory解析器
-│   │   ├── middle_format_converter.py # 格式转换器
-│   │   └── tools_extractor.py  # 工具提取器
-│   │
-│   └── utils/                  # 工具函数
-│       ├── file_utils.py       # 文件操作 ✅
-│       ├── validators.py       # 数据验证 ✅
-│       └── concurrency.py      # 并发工具（待实现）
-│
-├── tests/                      # 测试目录（待创建）
-│
-└── output/                     # 输出目录（gitignore）
-    ├── trajectories/           # 生成的trajectory
-    ├── middle_format/          # 转换后的中间格式
-    ├── progress/               # 进度文件
-    ├── logs/                   # 日志
-    └── tools/                  # 工具schema缓存
-```
+- [config](config)：配置文件
+- [data_examples](data_examples)：输入与输出示例
+- [docs](docs)：设计文档
+- [scripts](scripts)：运行脚本
+- [src](src)：核心实现
+- [tools/fetch_tools](tools/fetch_tools)：tools 提取脚本
+- [output](output)：运行输出
 
-## 快速开始
+关键文件：
 
-### 环境要求
+- [scripts/run_generation.py](scripts/run_generation.py)：主流程，负责生成、归档、转换、resume
+- [scripts/init_agents.py](scripts/init_agents.py)：初始化 worker agents
+- [src/openclaw_wrapper.py](src/openclaw_wrapper.py)：OpenClaw CLI 与 session 管理
+- [src/llm_client.py](src/llm_client.py)：生成下一轮 query
+- [src/converter.py](src/converter.py)：session 转 middle format
+- [tools/fetch_tools/dump_tools.mjs](tools/fetch_tools/dump_tools.mjs)：提取完整 tools catalog
 
-- Python 3.8+（推荐使用 conda dev 环境）
-- OpenClaw CLI（已安装并配置）
-- OpenClaw HTTP API 运行在 127.0.0.1:60012
-- LLM API（Azure OpenAI 或兼容 OpenAI SDK 的服务）
+## 环境要求
 
-### 安装
+- Python 3.9+
+- Node.js
+- 已安装并可直接调用的 `openclaw`
+- 可用的 LLM 服务（兼容 OpenAI SDK）
 
-1. **克隆项目**
+## 安装
 
-```bash
-git clone <your-repo-url>
-cd openclaw_gen_data
-```
-
-2. **激活 conda 环境**
+1. 激活 Python 环境
 
 ```bash
 conda activate dev
 ```
 
-3. **安装依赖**
+2. 安装依赖
 
 ```bash
 pip install -r requirements.txt
 ```
 
-4. **以开发模式安装项目**
+## 配置
 
-```bash
-pip install -e .
-```
-
-### 配置
-
-1. **复制配置模板**
+复制配置模板：
 
 ```bash
 cp config/config.yaml.example config/config.yaml
 ```
 
-2. **编辑配置文件**
+核心配置位于 [config/config.yaml](config/config.yaml)。
 
-打开 `config/config.yaml`，配置以下关键项：
+示例：
 
 ```yaml
 openclaw:
-  base_url: "http://127.0.0.1:60012"  # OpenClaw API 地址
+  base_agent: "main"
+  worker_prefix: "gendata-worker"
+  num_workers: 30
+  thinking: "off"
 
 llm:
-  base_url: "${LLM_BASE_URL}"         # LLM API 地址（环境变量）
-  api_key: "${LLM_API_KEY}"           # LLM API Key（环境变量）
-  model: "gpt-4o-2024-11-20"          # LLM 模型名称
+  base_url: "http://your-llm-endpoint/v1"
+  api_key: "your-api-key"
+  model: "your-model"
+  temperature: 0.7
+
+generation:
+  max_turns: 20
+  timeout: 600
 
 paths:
-  intents_file: "data_examples/intents.jsonl"  # Intent 数据文件
+  intents_file: "data_examples/intents.jsonl"
+  output_dir: "output"
+  sessions_dir: "output/sessions"
+  middle_format_dir: "output/middle_format"
+  progress_file: "output/progress.json"
+  logs_dir: "output/logs"
+  tools_cache_file: "output/tools/openclaw_all_tools.json"
 ```
 
-3. **设置环境变量**
+配置说明：
+
+- `openclaw.worker_prefix`：worker agent 前缀，例如 `gendata-worker-1`
+- `openclaw.num_workers`：默认并发 worker 数
+- `openclaw.thinking`：OpenClaw thinking 级别
+- `generation.max_turns`：保险轮次，避免死循环
+- `generation.timeout`：单次 OpenClaw 调用超时
+- `paths.tools_cache_file`：完整 tools catalog 缓存文件位置
+
+## 使用方式
+
+### 1. 初始化 agents
+
+如果对应 worker agents 尚未创建，先执行：
 
 ```bash
-export LLM_BASE_URL="https://your-llm-api-endpoint.com"
-export LLM_API_KEY="your-api-key"
+python scripts/init_agents.py --num-agents 30
 ```
 
-或者创建 `.env` 文件：
+### 2. 正式运行
+
+按配置中的默认并发运行：
 
 ```bash
-LLM_BASE_URL=https://your-llm-api-endpoint.com
-LLM_API_KEY=your-api-key
+python scripts/run_generation.py
 ```
 
-### 使用
+指定并发数：
 
-**注意**: 核心功能正在开发中（阶段2-5），完整的使用方式将在后续版本提供。
-
-目前可以测试已完成的模块：
-
-```python
-# 测试配置加载
-from openclaw_gen.config import Config
-
-Config.initialize("config/config.yaml")
-print(Config.get("openclaw.base_url"))
-
-# 测试日志系统
-from openclaw_gen.logging_config import setup_logging, get_logger
-
-setup_logging(Config.get_all())
-logger = get_logger(__name__)
-logger.info("测试日志系统")
-
-# 测试数据模型
-from openclaw_gen.models import Intent, Trajectory
-
-# 测试文件工具
-from openclaw_gen.utils.file_utils import load_jsonl
-
-intents = load_jsonl("data_examples/intents.jsonl")
-print(f"加载了 {len(intents)} 个 intent")
+```bash
+python scripts/run_generation.py --concurrent 30
 ```
 
-## 开发计划
+只跑前 10 条 intent：
 
-详细的开发计划请参考 [docs/plan.md](docs/plan.md)。
+```bash
+python scripts/run_generation.py --limit 10
+```
 
-### 当前进度
+强制刷新完整 tools catalog：
 
-- [x] **阶段1：基础设施** ✅
-  - [x] 目录结构
-  - [x] 配置管理系统
-  - [x] 日志系统
-  - [x] 数据模型定义
-  - [x] 基础工具函数
-  - [x] requirements.txt 和 setup.py
-  - [x] .gitignore 更新
+```bash
+python scripts/run_generation.py --refresh-tools
+```
 
-- [ ] **阶段2：连接器模块** 🚧
-  - [ ] OpenClawClient
-  - [ ] LLMClient
-  - [ ] 单元测试
+同时指定并发并刷新 tools：
 
-- [ ] **阶段3：核心逻辑** 🚧
-  - [ ] IntentLoader
-  - [ ] ProgressTracker
-  - [ ] UserLoop
-  - [ ] TrajectoryManager
+```bash
+python scripts/run_generation.py --concurrent 30 --refresh-tools
+```
 
-- [ ] **阶段4：数据处理** ⏸️
-- [ ] **阶段5：主脚本和并发** ⏸️
-- [ ] **阶段6：文档和测试** ⏸️
-- [ ] **阶段7：优化和发布** ⏸️
+## 运行流程
 
-## 技术栈
+主流程如下：
 
-- **核心依赖**:
-  - `pydantic`: 数据验证和模型定义
-  - `pyyaml`: YAML 配置文件解析
-  - `requests`: HTTP 通信
-  - `openai`: OpenAI SDK（兼容格式）
-  - `tqdm`: 进度显示
+1. 读取配置
+2. 确保 worker agents 存在
+3. 加载或生成完整 tools catalog
+4. 读取 intents
+5. 根据 progress 文件过滤已完成任务
+6. 每个 worker 绑定一个固定 agent，并发消费 intent 队列
+7. 对每条 intent：
+   - reset 当前 agent 的 main session
+   - 调用 LLM 生成下一条 query
+   - 调用 OpenClaw 执行一轮交互
+   - 重复直到完成或达到 `max_turns`
+   - 归档 session 文件
+   - 转换 middle format
+   - 再次 reset session
 
-- **开发工具**:
-  - `pytest`: 测试框架
-  - `black`: 代码格式化
-  - `isort`: import 排序
-  - `mypy`: 类型检查
+## 输出说明
 
-## 文档
+### Session 归档
 
-- [开发计划和架构设计](docs/plan.md)
-- [原始设计思路](docs/raw_design.txt)
-- 安装指南（待创建）
-- 使用指南（待创建）
-- API文档（待创建）
+归档后的原始 session 文件保存在 [output/sessions](output/sessions)。
 
-## 贡献
+文件名示例：
 
-欢迎提交 Issue 和 Pull Request！
+- `intent_123__gendata-worker-1__<session_id>.jsonl`
 
-## 许可
+### Middle Format
 
-MIT License
+转换后的数据保存在 [output/middle_format](output/middle_format)。
 
----
+每条 intent 对应一个 JSON 文件。
 
-**最后更新**: 2026-03-17  
-**版本**: v4.0.0 (阶段1完成)  
-**作者**: Claude Code
+### 进度文件
+
+进度文件位于 [output/progress.json](output/progress.json)。
+
+它用于：
+
+- 记录每条 intent 的状态
+- 下次运行时自动 resume
+- 跳过已成功完成的 intent
+
+### Tools Catalog
+
+完整 tools catalog 缓存位于 [output/tools/openclaw_all_tools.json](output/tools/openclaw_all_tools.json)。
+
+默认行为：
+
+- 如果缓存存在，直接读取
+- 如果缓存不存在，自动调用 [tools/fetch_tools/dump_tools.mjs](tools/fetch_tools/dump_tools.mjs) 生成
+- 如果生成失败，则退回 session 元数据兜底
+
+## 关于 tools 与 skills
+
+### tools
+
+`tools` 字段优先使用完整 catalog，这样能拿到更完整的：
+
+- tool name
+- description
+- parameters schema
+
+当前 [tools/fetch_tools/dump_tools.mjs](tools/fetch_tools/dump_tools.mjs) 已经改成动态发现当前 OpenClaw 工具，而不是仅依赖固定列表。
+
+不过需要注意：少数工具本身是运行时动态拼 schema，静态提取可能仍然不完整，这时会退回兜底策略。
+
+### skills
+
+`skills` 字段来自当前 session 对应的 `skillsSnapshot`，用于保存这次运行时 agent 可见的技能信息。
+
+## 设计说明
+
+### 为什么使用 CLI 而不是 HTTP API
+
+- OpenClaw 当前最稳定、最贴近真实运行状态的是 CLI + 本地 session
+- session 文件天然可归档，便于后处理
+- `openclaw agent --json` 已经能返回足够的运行元数据
+
+### 为什么不是并发复用同一个 agent
+
+因为同一个 agent 的 main session 会冲突。
+
+当前实现采用：
+
+- 整体并发 = worker 数
+- 一个 worker 对应一个 agent
+- 同一个 worker 内串行处理多条 intent
+
+这样既保留并发能力，又避免 session 串线。
+
+### 为什么还保留 `max_turns`
+
+`max_turns` 是保险丝，不是主要停止机制。
+
+真正的停止逻辑由 user loop 判断是否完成；`max_turns` 只是用来防止异常情况下进入死循环。
+
+## 常见问题
+
+### 1. 为什么 `--session-id` 不能可靠复用会话
+
+在当前环境中，`openclaw agent --session-id ...` 并不会稳定切换到指定 session，因此项目采用“worker main session + 显式 reset”的方式管理会话。
+
+### 2. 为什么 tools 有时不完整
+
+原因通常有三种：
+
+- tools catalog 缓存不存在且自动生成失败
+- 当前 OpenClaw 版本中某些工具 schema 是运行时动态拼出来的
+- 插件工具定义位于额外扩展目录，需要脚本额外扫描
+
+建议先执行：
+
+```bash
+python scripts/run_generation.py --refresh-tools --limit 1
+```
+
+### 3. 为什么可以直接 resume
+
+因为 [output/progress.json](output/progress.json) 会记录已完成 intent；再次运行时会自动过滤成功项。
+
+## 相关文档
+
+- [docs/raw_design.txt](docs/raw_design.txt)：原始设计思路
+- [docs/plan.md](docs/plan.md)：历史开发计划
+- [data_examples/middle_format_data.json](data_examples/middle_format_data.json)：middle format 示例
+
+## 当前状态
+
+- 主流程可用
+- 自动 tools catalog 已接入主流程
+- session 归档与 middle format 转换已接通
+- README 与当前实现已基本对齐
+
+如果你接下来要继续完善，优先建议关注：
+
+- `message / cron / web_fetch` 这类运行时动态 schema 工具的进一步补齐
+- 更细的错误重试与失败归因
+- 生成结果质量评估
