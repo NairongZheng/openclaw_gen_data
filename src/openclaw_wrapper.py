@@ -10,6 +10,31 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 
+
+
+# Worker 沙箱配置
+# mode: "all" - 所有 session 都进 Docker 沙箱
+# scope: "session" - 每个 session 独立容器，结束后销毁
+# workspaceAccess: "ro" - 只读挂载 workspace（可读 skills，写操作走容器临时目录）
+WORKER_SANDBOX_CONFIG = {
+    "mode": "all",
+    "scope": "session",
+    "workspaceAccess": "ro"
+}
+
+# Worker 工具列表（使用 allow 完全替换，独立配置）
+# 包含 exec 和 process，在沙箱内安全
+WORKER_TOOLS_ALLOW = [
+    "read", "write", "edit", "apply_patch",
+    "exec", "process",  # 沙箱内安全
+    "web_search", "web_fetch",
+    "memory_search", "memory_get",
+    "sessions_list", "sessions_history", "sessions_send", "sessions_spawn",
+    "session_status", "subagents", "agents_list",
+    "image", "tts"
+]
+
+
 def _extract_json_payload(raw_text: str) -> Any:
     """从混杂日志的输出中提取首个 JSON 对象或数组。"""
     if not raw_text:
@@ -50,74 +75,217 @@ def expected_agent_workspace(agent_id: str, workspace_root: Optional[str] = None
     return resolve_workspace_root(workspace_root) / agent_id
 
 
+def configure_agent(
+    agent_id: str,
+    workspace: Optional[str] = None,
+    sandbox: Optional[Dict[str, str]] = None,
+    tools_allow: Optional[List[str]] = None,
+    config_path: Optional[Path] = None
+) -> None:
+    """配置 agent 的 workspace、sandbox 和工具。
+
+    Args:
+        agent_id: agent 名称
+        workspace: workspace 路径（可选）
+        sandbox: 沙箱配置（可选）
+        tools_allow: 工具列表（可选，使用 allow 完全替换）
+        config_path: 配置文件路径（可选，默认 ~/.openclaw/openclaw.json）
+    """
+    if config_path is None:
+        config_path = Path.home() / ".openclaw" / "openclaw.json"
+
+    # 1. 读取配置文件
+    if config_path.exists():
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+    else:
+        config = {"agents": {"list": []}}
+
+    # 2. 确保 agents.list 存在
+    if "agents" not in config:
+        config["agents"] = {}
+    if "list" not in config["agents"]:
+        config["agents"]["list"] = []
+
+    # 3. 查找或创建 agent 配置
+    agent_list = config["agents"]["list"]
+    agent_config = None
+    for agent in agent_list:
+        if agent.get("id") == agent_id:
+            agent_config = agent
+            break
+
+    if agent_config is None:
+        agent_config = {"id": agent_id}
+        agent_list.append(agent_config)
+
+    # 4. 配置 workspace
+    if workspace is not None:
+        agent_config["workspace"] = workspace
+        logger.info(f"已配置 agent {agent_id} 的 workspace: {workspace}")
+
+    # 5. 配置 sandbox
+    if sandbox is not None:
+        agent_config["sandbox"] = sandbox
+        logger.info(f"已配置 agent {agent_id} 的 sandbox: {sandbox}")
+
+    # 6. 配置 tools（使用 allow 完全替换）
+    if tools_allow is not None:
+        agent_config["tools"] = {"allow": tools_allow}
+        logger.info(f"已配置 agent {agent_id} 的工具列表（allow: {len(tools_allow)} 个）")
+
+    # 7. 保存配置文件
+    with open(config_path, 'w', encoding='utf-8') as f:
+        json.dump(config, f, indent=2, ensure_ascii=False)
+
+
+def configure_sandbox(
+    agent_ids: List[str],
+    sandbox_config: Dict[str, str],
+    config_path: Optional[Path] = None
+) -> None:
+    """为多个 agents 批量配置沙箱。
+
+    Args:
+        agent_ids: agent ID 列表
+        sandbox_config: 沙箱配置字典
+        config_path: 配置文件路径（可选，默认 ~/.openclaw/openclaw.json）
+    """
+    if config_path is None:
+        config_path = Path.home() / ".openclaw" / "openclaw.json"
+
+    # 读取配置
+    if config_path.exists():
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+    else:
+        logger.warning(f"配置文件不存在: {config_path}")
+        return
+
+    # 为每个 agent 配置 sandbox
+    agent_list = config.get("agents", {}).get("list", [])
+    configured_count = 0
+
+    for agent_config in agent_list:
+        if agent_config.get("id") in agent_ids:
+            agent_config["sandbox"] = sandbox_config
+            configured_count += 1
+
+    # 保存配置
+    with open(config_path, 'w', encoding='utf-8') as f:
+        json.dump(config, f, indent=2, ensure_ascii=False)
+
+    logger.info(f"已为 {configured_count}/{len(agent_ids)} 个 agents 配置沙箱")
+
+
+def delete_worker_agents(worker_prefix: str = "gendata-worker") -> List[str]:
+    """删除所有指定前缀的 worker agents。
+
+    Args:
+        worker_prefix: worker agent 前缀
+
+    Returns:
+        已删除的 agent ID 列表
+    """
+    existing_agents = list_agents()
+    worker_agents = [
+        agent["id"] for agent in existing_agents
+        if agent["id"].startswith(worker_prefix)
+    ]
+
+    deleted = []
+    for agent_id in worker_agents:
+        logger.info(f"删除 agent: {agent_id}")
+        result = subprocess.run(
+            ["openclaw", "agents", "delete", agent_id, "--force", "--json"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            logger.error(f"删除 agent {agent_id} 失败: {result.stderr}")
+            continue
+        deleted.append(agent_id)
+
+    return deleted
+
+
 def ensure_agents(
     num_agents: int,
     worker_prefix: str = "gendata-worker",
     workspace_root: Optional[str] = None,
-    recreate_mismatched: bool = False,
+    force_recreate: bool = False,
+    add_tools: bool = True,
 ) -> Dict[str, List[str]]:
-    """确保所需数量的 worker agents 存在并使用独立 workspace。"""
-    existing_agents = {agent["id"]: agent for agent in list_agents()}
+    """确保所需数量的 worker agents 存在并使用独立 workspace。
+
+    Args:
+        num_agents: 要创建的 agent 数量
+        worker_prefix: worker agent 前缀
+        workspace_root: workspace 根目录
+        force_recreate: 是否强制删除所有 worker agents 重新创建
+        add_tools: 是否自动配置 sandbox 和工具（默认 True）
+
+    Returns:
+        包含 created、existing、deleted 列表的字典
+    """
     root_dir = resolve_workspace_root(workspace_root)
     root_dir.mkdir(parents=True, exist_ok=True)
 
+    deleted: List[str] = []
+
+    # 强制重置：删除所有 worker agents
+    if force_recreate:
+        logger.info(f"强制删除所有 {worker_prefix} agents...")
+        deleted = delete_worker_agents(worker_prefix)
+        if deleted:
+            logger.info(f"已删除 {len(deleted)} 个 agents: {', '.join(deleted)}")
+
+    # 获取当前 agents
+    existing_agents = {agent["id"]: agent for agent in list_agents()}
+
     created: List[str] = []
     existing: List[str] = []
-    recreated: List[str] = []
-    mismatched: List[str] = []
 
+    # 创建所需数量的 agents（简化逻辑，不检查 workspace）
     for index in range(1, num_agents + 1):
         agent_id = f"{worker_prefix}-{index}"
         desired_workspace = expected_agent_workspace(agent_id, str(root_dir))
         desired_workspace.mkdir(parents=True, exist_ok=True)
 
-        existing_agent = existing_agents.get(agent_id)
-        if existing_agent:
-            current_workspace = existing_agent.get("workspace")
-            if current_workspace == str(desired_workspace):
-                existing.append(agent_id)
-                continue
+        # 如果 agent 已存在，跳过创建
+        if agent_id in existing_agents:
+            existing.append(agent_id)
+            continue
 
-            if not recreate_mismatched:
-                mismatched.append(
-                    f"{agent_id} (current: {current_workspace}, expected: {desired_workspace})"
-                )
-                continue
-
-            delete_result = subprocess.run(
-                ["openclaw", "agents", "delete", agent_id, "--force", "--json"],
-                capture_output=True,
-                text=True,
-            )
-            if delete_result.returncode != 0:
-                raise RuntimeError(f"Failed to delete agent {agent_id}: {delete_result.stderr}")
-            recreated.append(agent_id)
-
+        # 创建新 agent
         cmd = [
-            "openclaw",
-            "agents",
-            "add",
-            agent_id,
+            "openclaw", "agents", "add", agent_id,
             "--non-interactive",
-            "--workspace",
-            str(desired_workspace),
+            "--workspace", str(desired_workspace),
             "--json",
         ]
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
             raise RuntimeError(f"Failed to create agent {agent_id}: {result.stderr}")
-        if agent_id in recreated:
-            continue
         created.append(agent_id)
 
-    if mismatched:
-        raise RuntimeError(
-            "Found agents using shared or unexpected workspaces. "
-            "Re-run init with recreate enabled or delete them manually: "
-            + "; ".join(mismatched)
+    # 配置 workspace 和工具（不配置 sandbox）
+    if add_tools:
+        all_agent_ids = [f"{worker_prefix}-{i+1}" for i in range(num_agents)]
+        logger.info(f"开始配置 {len(all_agent_ids)} 个 agents...")
+        for agent_id in all_agent_ids:
+            desired_workspace = expected_agent_workspace(agent_id, str(root_dir))
+            configure_agent(
+                agent_id,
+                workspace=str(desired_workspace),
+                sandbox=None,  # 不配置 sandbox
+                tools_allow=WORKER_TOOLS_ALLOW
+            )
+        logger.info(
+            f"已完成配置（workspace + {len(WORKER_TOOLS_ALLOW)} 个工具）"
         )
 
-    return {"created": created, "existing": existing, "recreated": recreated}
+    return {"created": created, "existing": existing, "deleted": deleted}
 
 
 class OpenClawWrapper:

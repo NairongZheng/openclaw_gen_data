@@ -118,16 +118,28 @@ paths:
 
 ### 1. 初始化 agents
 
-如果对应 worker agents 尚未创建，先执行：
+创建 agents 并配置工具（默认配置19个内置工具），默认生成工具列表：
 
 ```bash
 python scripts/init_agents.py --num-agents 30
 ```
 
-如果你已经创建过共享 workspace 的 agents，需要按隔离目录重建：
+创建 agents + 生成工具列表：
 
 ```bash
-python scripts/init_agents.py --num-agents 30 --recreate-mismatched
+python scripts/init_agents.py --num-agents 30 --refresh-tools
+```
+
+强制删除并重建所有 worker agents：
+
+```bash
+python scripts/init_agents.py --num-agents 30 --force-recreate
+```
+
+刷新单个 agent 的工具列表：
+
+```bash
+python scripts/init_agents.py --refresh-agent gendata-worker-1
 ```
 
 ### 2. 正式运行
@@ -150,16 +162,22 @@ python scripts/run_generation.py --concurrent 30
 python scripts/run_generation.py --limit 10
 ```
 
-强制刷新完整 tools catalog：
+启用沙箱模式运行：
 
 ```bash
-python scripts/run_generation.py --refresh-tools
+python scripts/run_generation.py --concurrent 30 --enable-sandbox
 ```
 
-同时指定并发并刷新 tools：
+刷新工具列表后运行：
 
 ```bash
-python scripts/run_generation.py --concurrent 30 --refresh-tools
+python scripts/run_generation.py --refresh-tools --limit 1
+```
+
+完整命令（沙箱 + 刷新工具 + 并发）：
+
+```bash
+python scripts/run_generation.py --enable-sandbox --refresh-tools --concurrent 30
 ```
 
 ## 运行流程
@@ -283,6 +301,12 @@ python scripts/run_generation.py --concurrent 30 --refresh-tools
 - 插件工具定义位于额外扩展目录，需要脚本额外扫描
 
 建议先执行：
+
+```bash
+python scripts/init_agents.py --num-agents 30 --refresh-tools
+```
+
+或运行时刷新：
 
 ```bash
 python scripts/run_generation.py --refresh-tools --limit 1

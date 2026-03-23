@@ -91,6 +91,12 @@ class DataConverter:
                 text = self.parser.extract_text_from_content(content)
                 tool_calls_list = self.parser.extract_tool_calls(content)
 
+                # 过滤完全空白的消息（既无文本也无工具调用）
+                # 这些通常是 OpenClaw 内部的模型切换或重试产生的中间状态
+                if not text and not tool_calls_list:
+                    logger.debug(f"Skipping empty assistant message at timestamp {msg.get('timestamp')}")
+                    continue
+
                 # 转换为 OpenAI 格式的 tool_calls
                 tool_calls = [
                     {

@@ -3,6 +3,7 @@ import argparse
 import json
 import logging
 import queue
+import shutil
 import subprocess
 import sys
 import threading
@@ -53,7 +54,11 @@ class ProgressTracker:
 
 
 def load_tools_catalog(cache_file: str) -> List[Dict[str, Any]]:
-    """加载预生成的工具定义。"""
+    """加载预生成的工具定义（兼容旧格式）。
+
+    注意：此函数用于加载所有 agent 共享的工具列表（旧格式）
+    新格式应使用 load_agent_tools()
+    """
     cache_path = Path(cache_file)
     try:
         if cache_path.exists():
@@ -62,6 +67,37 @@ def load_tools_catalog(cache_file: str) -> List[Dict[str, Any]]:
         return []
     except Exception as exc:
         logger.warning("加载 tools catalog 失败，将退回到 session 元数据兜底: %s", exc)
+        return []
+
+
+def load_agent_tools(cache_file: str, agent_id: str) -> List[Dict[str, Any]]:
+    """从缓存文件加载特定 agent 的工具列表。
+
+    Args:
+        cache_file: 缓存文件路径
+        agent_id: agent 名称
+
+    Returns:
+        工具列表（OpenAI format），如果不存在则返回空列表
+    """
+    cache_path = Path(cache_file)
+    if not cache_path.exists():
+        logger.warning(f"工具缓存文件不存在: {cache_file}")
+        return []
+
+    try:
+        data = load_json(str(cache_path))
+
+        # 新格式：{agent_id: [tools...]}
+        if isinstance(data, dict) and agent_id in data:
+            tools = data[agent_id]
+            logger.info(f"已加载 agent {agent_id} 的工具列表，共 {len(tools)} 个工具")
+            return tools
+        else:
+            logger.warning(f"未找到 agent {agent_id} 的工具列表")
+            return []
+    except Exception as e:
+        logger.error(f"加载 agent {agent_id} 的工具列表失败: {e}")
         return []
 
 
@@ -126,6 +162,56 @@ def extract_available_tool_entries(session_info: Dict[str, Any]) -> List[Dict[st
     return (session_info or {}).get("systemPromptReport", {}).get("tools", {}).get("entries", [])
 
 
+def restore_workspace_snapshot(agent_name: str, config: Dict[str, Any]) -> None:
+    """从快照恢复 agent workspace。
+
+    Args:
+        agent_name: agent 名称
+        config: 配置字典
+    """
+    from src.openclaw_wrapper import expected_agent_workspace, resolve_workspace_root
+
+    workspace_root = config["openclaw"].get("workspace_root")
+    root_dir = resolve_workspace_root(workspace_root)
+    workspace = expected_agent_workspace(agent_name, str(root_dir))
+
+    # 快照路径
+    project_root = Path(__file__).parent.parent
+    snapshot_path = project_root / "output" / "workspace_snapshots" / agent_name
+
+    if not snapshot_path.exists():
+        logger.warning(f"Agent {agent_name} 的快照不存在，跳过恢复: {snapshot_path}")
+        return
+
+    # 删除当前 workspace 的内容（保留 .git）
+    if workspace.exists():
+        for item in workspace.iterdir():
+            if item.name == '.git':
+                continue
+            try:
+                if item.is_dir():
+                    shutil.rmtree(item)
+                else:
+                    item.unlink()
+            except Exception as e:
+                logger.warning(f"删除 {item} 失败: {e}")
+
+    # 从快照恢复（排除 .git）
+    for item in snapshot_path.iterdir():
+        if item.name == '.git':
+            continue
+        dest = workspace / item.name
+        try:
+            if item.is_dir():
+                shutil.copytree(item, dest, symlinks=False)
+            else:
+                shutil.copy2(item, dest)
+        except Exception as e:
+            logger.warning(f"恢复 {item} 失败: {e}")
+
+    logger.info(f"已从快照恢复 agent {agent_name} 的 workspace")
+
+
 def process_intent(
     intent_data: Dict[str, Any],
     agent_name: str,
@@ -138,6 +224,9 @@ def process_intent(
 
     openclaw = OpenClawWrapper(agent_name)
     try:
+        # 在 session 开始前恢复 workspace 快照
+        restore_workspace_snapshot(agent_name, config)
+
         openclaw.reset_main_session()
 
         llm = LLMClient(
@@ -159,7 +248,7 @@ def process_intent(
             llm_result = llm.generate_next_query(
                 intent=intent_data["natural_language_intent"],
                 persona=intent_data.get("metadata", {}).get("persona", {}),
-                conversation_history=conversation_history
+                conversation_history=conversation_history,
             )
 
             if llm_result.get("completed", False):
@@ -234,10 +323,28 @@ def worker_loop(
     agent_name: str,
     task_queue: "queue.Queue[Dict[str, Any]]",
     config: Dict[str, Any],
-    tools_catalog: List[Dict[str, Any]],
+    tools_cache_file: str,
     progress: ProgressTracker,
 ) -> List[Dict[str, Any]]:
-    """单个 worker 串行消费 intent 队列，但多个 worker 之间并发。"""
+    """单个 worker 串行消费 intent 队列，但多个 worker 之间并发。
+
+    Args:
+        agent_name: worker agent 名称
+        task_queue: 任务队列
+        config: 配置
+        tools_cache_file: 工具缓存文件路径
+        progress: 进度跟踪器
+
+    Returns:
+        处理结果列表
+    """
+    # 为当前 worker 的 agent 加载工具列表
+    worker_tools = load_agent_tools(tools_cache_file, agent_name)
+
+    if not worker_tools:
+        logger.warning(f"Worker {agent_name} 未找到工具缓存，使用空列表（将退回 session 元数据）")
+        worker_tools = []
+
     results: List[Dict[str, Any]] = []
     while True:
         try:
@@ -245,7 +352,7 @@ def worker_loop(
         except queue.Empty:
             break
 
-        result = process_intent(intent_data, agent_name, config, tools_catalog)
+        result = process_intent(intent_data, agent_name, config, worker_tools)
         progress.record(result)
         results.append(result)
         task_queue.task_done()
@@ -259,6 +366,7 @@ def main():
     parser.add_argument("--limit", type=int, help="限制处理数量")
     parser.add_argument("--concurrent", type=int, help="并发数")
     parser.add_argument("--refresh-tools", action="store_true", help="启动前强制刷新完整 tools catalog")
+    parser.add_argument("--enable-sandbox",action="store_true",default=False,help="为 worker agents 启用沙箱模式（默认: false）")
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -278,16 +386,37 @@ def main():
         num_agents=num_workers,
         worker_prefix=worker_prefix,
         workspace_root=workspace_root,
+        add_tools=True,  # 生成数据时启用工具白名单
     )
     logger.info(
-        "worker agents 就绪，已存在 %s 个，新建 %s 个，重建 %s 个",
+        "worker agents 就绪，已存在 %s 个，新建 %s 个，已删除 %s 个",
         len(ensure_result["existing"]),
         len(ensure_result["created"]),
-        len(ensure_result["recreated"]),
+        len(ensure_result.get("deleted", [])),
     )
 
-    project_root = Path(__file__).resolve().parent.parent
-    tools_catalog = ensure_tools_catalog(project_root, config["paths"]["tools_cache_file"], args.refresh_tools)
+    # 如果启用沙箱，为所有 worker agents 配置
+    if args.enable_sandbox:
+        from src.openclaw_wrapper import configure_sandbox, WORKER_SANDBOX_CONFIG
+        worker_ids = [f"{worker_prefix}-{i+1}" for i in range(num_workers)]
+        logger.info(f"启用沙箱模式，配置 {len(worker_ids)} 个 worker agents...")
+        configure_sandbox(worker_ids, WORKER_SANDBOX_CONFIG)
+        logger.info("✓ 沙箱配置完成")
+
+    # 如果需要刷新工具列表，重新生成所有 agents 的工具
+    if args.refresh_tools:
+        from scripts.init_agents import generate_all_agents_tools
+        project_root = Path(__file__).parent.parent
+        tools_cache_file = config["paths"]["tools_cache_file"]
+        worker_ids = [f"{worker_prefix}-{i+1}" for i in range(num_workers)]
+
+        logger.info(f"刷新所有 {num_workers} 个 agents 的工具列表...")
+        try:
+            generate_all_agents_tools(worker_ids, tools_cache_file, project_root)
+            logger.info(f"✓ 工具列表已保存到 {tools_cache_file}")
+        except Exception as e:
+            logger.error(f"刷新工具列表失败: {e}")
+            # 继续执行，使用现有缓存或退回 session 元数据
 
     intents = load_intents(config["paths"]["intents_file"])
     logger.info(f"加载 {len(intents)} 个 intents")
@@ -314,7 +443,15 @@ def main():
         futures = []
         for worker_index in range(1, num_workers + 1):
             agent_name = f"{worker_prefix}-{worker_index}"
-            future = executor.submit(worker_loop, agent_name, task_queue, config, tools_catalog, progress)
+            # 传递 tools_cache_file 而不是预加载的 tools_catalog
+            future = executor.submit(
+                worker_loop,
+                agent_name,
+                task_queue,
+                config,
+                config["paths"]["tools_cache_file"],
+                progress
+            )
             futures.append(future)
 
         for future in as_completed(futures):

@@ -1,4 +1,5 @@
 import json
+import re
 from typing import List, Dict, Optional
 
 
@@ -42,18 +43,34 @@ class SessionParser:
 
     @staticmethod
     def extract_text_from_content(content: List[Dict]) -> str:
-        """从content数组中提取纯文本内容
+        """从content数组中提取纯文本内容，并清理OpenClaw CLI添加的时间戳前缀
 
         Args:
             content: message.content数组
 
         Returns:
             str: 提取的文本内容（多个text部分用空格连接）
+
+        Note:
+            OpenClaw CLI 在通过 --message 发送消息时会自动添加时间戳前缀，
+            格式如: [Day YYYY-MM-DD HH:MM TIMEZONE] 或 [Day HH:MM TIMEZONE]
+            例如: [Fri 2026-03-20 17:45 GMT+8] 或 [Mon 09:30 UTC]
+            此方法会自动移除这些前缀，以保证训练数据的干净性。
         """
+        # 定义时间戳前缀的正则表达式
+        # 格式: [Day YYYY-MM-DD HH:MM TIMEZONE] 或 [Day HH:MM TIMEZONE]
+        # 其中 Day 为英文缩写（Mon/Tue/Wed/Thu/Fri/Sat/Sun）
+        # TIMEZONE 格式为 [A-Z]{3}[+-]?\d* (如 GMT+8, UTC, EST-5)
+        timestamp_pattern = r'^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+(?:\d{4}-\d{2}-\d{2}\s+)?\d{2}:\d{2}\s+[A-Z]{3}[+-]?\d*\]\s*'
+
         text_parts = []
         for item in content:
             if item.get("type") == "text":
-                text_parts.append(item.get("text", ""))
+                text = item.get("text", "")
+                if text:
+                    # 清理 OpenClaw CLI 自动添加的时间戳前缀
+                    text = re.sub(timestamp_pattern, '', text)
+                    text_parts.append(text)
         return " ".join(text_parts).strip()
 
     @staticmethod

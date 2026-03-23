@@ -69,5 +69,7 @@ paths:
   # 日志目录
   logs_dir: "output/logs"
   
-  # 工具 catalog 缓存文件；主流程会优先读取，没有时自动调用 tools/fetch_tools/dump_tools.mjs 生成
+  # 工具 catalog 缓存文件；按 agent 分组存储 {agent_id: [tools]}
+  # 使用 init_agents.py --refresh-tools 生成
+  # 注意：文件名可以是任意名称，实际配置使用 openclaw_all_tools.json
   tools_cache_file: "output/tools/openclaw_all_tools.json"

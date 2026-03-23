@@ -49,6 +49,9 @@ config/config.yaml
 claude_files/
 helpme_docs/
 archive/
+CLAUDE.md
+docs/planme.md
+docs/IMPLEMENTATION_SUMMARY.md
 
 # Notebook artifacts
 .ipynb_checkpoints/

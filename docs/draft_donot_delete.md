@@ -52,3 +52,26 @@ if response.get("result", {}).get("payloads"):
 1. 当前 session 管理有点问题，应该是先清空，然后再进行交互，交互完再进行清空
 2. 最终结果需要保存一个 tools 字段跟一个 skills 字段，需要提取
 3. 与 openclaw 的交互好像除了用命令行的方式，也可以直接用网管走 http 或者 websocket？请你看看哪种方式最好
+
+
+
+
+
+1.init_agent 现在默认不配置沙盒模式 工具的allowlist不用变； 然后init_agent还需要一个重置tool_list的功能 要支持重新扫描工具 就不需要重新建agent了 只是扫描而已
+2.由于后期可能会需要支持沙盒模式，所以我们把这个放在run_generation里面 给所有worker加一个沙盒配置 也是用个参数来决定起不起用 默认不起用
+
+
+
+ 你帮我看一下usermodel得到的对话历史是什么
+  只能包括assistant和usermodel的对话过程 不能包括tool这些啊
+
+
+   你帮我修改一下'/Users/luosiyuan/openclaw_proj/openclaw_gen_data/scripts/init_a
+  gents.py' 在创建agent的时候 在他们的AGENTS.md中最开头的内容# AGENTS.md - Your
+  Workspace
+
+  This folder is home. Treat it that way.后加入一句"And very important: only
+  work in your workspace!!!" ; 不用动agent原来的其他文件 还有在init agent之后
+  保存一个当前agent workspace的快照在一个合理的位置；在每次/Users/luosiyuan/open
+  claw_proj/openclaw_gen_data/scripts/run_generation.py进行完一个session后要恢复
+  原来的workspace来进行不同session的完全隔离
