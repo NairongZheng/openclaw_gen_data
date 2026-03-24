@@ -121,6 +121,7 @@ paths:
 创建 agents 并配置工具（默认配置19个内置工具），默认生成工具列表：
 
 ```bash
+python scripts/init_agents.py --num-agents 5 --force-recreate --refresh-tools
 python scripts/init_agents.py --num-agents 30
 ```
 
@@ -162,22 +163,10 @@ python scripts/run_generation.py --concurrent 30
 python scripts/run_generation.py --limit 10
 ```
 
-启用沙箱模式运行：
-
-```bash
-python scripts/run_generation.py --concurrent 30 --enable-sandbox
-```
-
 刷新工具列表后运行：
 
 ```bash
 python scripts/run_generation.py --refresh-tools --limit 1
-```
-
-完整命令（沙箱 + 刷新工具 + 并发）：
-
-```bash
-python scripts/run_generation.py --enable-sandbox --refresh-tools --concurrent 30
 ```
 
 ## 运行流程

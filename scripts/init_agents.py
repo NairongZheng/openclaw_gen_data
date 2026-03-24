@@ -266,6 +266,15 @@ def init_agents(
     logger.info(f"开始检查并创建 {num_agents} 个 agents...")
     root_dir = resolve_workspace_root(workspace_root)
     logger.info("worker workspaces 根目录: %s", root_dir)
+
+    # 如果强制重建，先删除旧的 workspace 快照
+    if force_recreate and project_root:
+        snapshot_dir = project_root / "output" / "workspace_snapshots"
+        if snapshot_dir.exists():
+            logger.info("删除旧的 workspace 快照...")
+            shutil.rmtree(snapshot_dir)
+            logger.info("✓ 已删除旧快照")
+
     result = ensure_agents(
         num_agents=num_agents,
         worker_prefix=worker_prefix,
@@ -304,6 +313,75 @@ def init_agents(
             logger.info(f"✓ 已保存新 agents 的 workspace 快照到 {snapshot_dir}")
     else:
         logger.info("无新建 agents，跳过 AGENTS.md 修改和快照保存")
+
+    # 配置全局 skills 设置和 provider
+    if project_root:
+        from src.openclaw_wrapper import configure_global_skills, configure_global_provider
+
+        config = load_config()
+        skills_dir_rel = config["paths"].get("skills_dir", "tools/skills/skills_collections")
+        skills_dir = project_root / skills_dir_rel
+        logger.info("配置全局 skills 设置...")
+        configure_global_skills(
+            extra_dirs=[str(skills_dir)],
+            allow_bundled=[]  # 禁用所有内置 skills
+        )
+        logger.info("✓ 已配置全局 skills 设置")
+
+        # 配置全局 provider
+        config = load_config()
+        openclaw_config = config.get("openclaw", {})
+        model_url = openclaw_config.get("model_url")
+        model_api_key = openclaw_config.get("model_api_key")
+        model = openclaw_config.get("model")
+        context_window = openclaw_config.get("context_window", 200000)
+        max_tokens = openclaw_config.get("max_tokens", 200000)
+
+        if model_url and model_api_key and model:
+            logger.info("配置全局 provider...")
+            configure_global_provider(
+                provider_name="trajectory_provider",
+                base_url=model_url,
+                api_key=model_api_key,
+                model_id=model,
+                context_window=context_window,
+                max_tokens=max_tokens
+            )
+            logger.info("✓ 已配置全局 provider")
+
+    # 配置所有 agents 的 model 和 skills
+    all_agent_ids = [f"{worker_prefix}-{i+1}" for i in range(num_agents)]
+    if project_root:
+        config = load_config()
+        openclaw_config = config.get("openclaw", {})
+        model_url = openclaw_config.get("model_url")
+        model_api_key = openclaw_config.get("model_api_key")
+        model = openclaw_config.get("model")
+
+        if model_url and model_api_key and model:
+            logger.info(f"配置 {len(all_agent_ids)} 个 agents 的 model 和 skills...")
+            from src.openclaw_wrapper import configure_agent
+
+            # 从配置读取 skills 目录
+            skills_dir_rel = config["paths"].get("skills_dir", "tools/skills/skills_collections")
+            skills_dir = project_root / skills_dir_rel
+            agent_skills = []
+            if skills_dir.exists():
+                agent_skills = [d.name for d in skills_dir.iterdir() if d.is_dir()]
+                logger.info(f"从 {skills_dir} 读取到 {len(agent_skills)} 个 skills")
+
+            # model 格式：provider_name/model_name
+            model_config = f"trajectory_provider/{model}"
+
+            for agent_id in all_agent_ids:
+                configure_agent(
+                    agent_id=agent_id,
+                    model=model_config,
+                    skills=agent_skills
+                )
+            logger.info(f"✓ 已配置所有 agents 的 model 和 {len(agent_skills)} 个 skills")
+        else:
+            logger.warning("配置文件中缺少 model_url/model_api_key/model，跳过配置")
 
     # 新增：生成工具列表
     if refresh_tools or refresh_agents:

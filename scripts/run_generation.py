@@ -366,7 +366,6 @@ def main():
     parser.add_argument("--limit", type=int, help="限制处理数量")
     parser.add_argument("--concurrent", type=int, help="并发数")
     parser.add_argument("--refresh-tools", action="store_true", help="启动前强制刷新完整 tools catalog")
-    parser.add_argument("--enable-sandbox",action="store_true",default=False,help="为 worker agents 启用沙箱模式（默认: false）")
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -394,14 +393,6 @@ def main():
         len(ensure_result["created"]),
         len(ensure_result.get("deleted", [])),
     )
-
-    # 如果启用沙箱，为所有 worker agents 配置
-    if args.enable_sandbox:
-        from src.openclaw_wrapper import configure_sandbox, WORKER_SANDBOX_CONFIG
-        worker_ids = [f"{worker_prefix}-{i+1}" for i in range(num_workers)]
-        logger.info(f"启用沙箱模式，配置 {len(worker_ids)} 个 worker agents...")
-        configure_sandbox(worker_ids, WORKER_SANDBOX_CONFIG)
-        logger.info("✓ 沙箱配置完成")
 
     # 如果需要刷新工具列表，重新生成所有 agents 的工具
     if args.refresh_tools:
