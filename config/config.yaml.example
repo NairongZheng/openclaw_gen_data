@@ -4,20 +4,16 @@
 
 # ============== OpenClaw 配置 ==============
 openclaw:
-  # 仅用于说明默认主 agent，实际生成使用 worker_prefix + 序号
   base_agent: "main"
-
-  # worker agent 前缀，例如 gendata-worker-1 ~ gendata-worker-30
   worker_prefix: "gendata-worker"
-
-  # 每个 worker 独立 workspace 的根目录；最终会使用 <workspace_root>/<agent_id>
   workspace_root: "~/.openclaw/workspaces"
-
-  # 默认并发 worker 数
-  num_workers: 5
-
-  # OpenClaw thinking 级别，可选 off|minimal|low|medium|high|xhigh
+  num_workers: 3
   thinking: "off"
+  model_url: "xxx"
+  model_api_key: "xxx"
+  model: "claude-sonnet-4-6"
+  context_window: 200000
+  max_tokens: 200000
 
 # ============== LLM API 配置 ==============
 llm:
@@ -73,3 +69,6 @@ paths:
   # 使用 init_agents.py --refresh-tools 生成
   # 注意：文件名可以是任意名称，实际配置使用 openclaw_all_tools.json
   tools_cache_file: "output/tools/openclaw_all_tools.json"
+
+  # Skills 目录路径
+  skills_dir: "tools/skills/skills_collections"

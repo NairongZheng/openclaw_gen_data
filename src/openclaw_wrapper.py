@@ -10,23 +10,10 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 
-
-
-# Worker 沙箱配置
-# mode: "all" - 所有 session 都进 Docker 沙箱
-# scope: "session" - 每个 session 独立容器，结束后销毁
-# workspaceAccess: "ro" - 只读挂载 workspace（可读 skills，写操作走容器临时目录）
-WORKER_SANDBOX_CONFIG = {
-    "mode": "all",
-    "scope": "session",
-    "workspaceAccess": "ro"
-}
-
 # Worker 工具列表（使用 allow 完全替换，独立配置）
-# 包含 exec 和 process，在沙箱内安全
 WORKER_TOOLS_ALLOW = [
     "read", "write", "edit", "apply_patch",
-    "exec", "process",  # 沙箱内安全
+    "exec", "process",
     "web_search", "web_fetch",
     "memory_search", "memory_get",
     "sessions_list", "sessions_history", "sessions_send", "sessions_spawn",
@@ -78,17 +65,21 @@ def expected_agent_workspace(agent_id: str, workspace_root: Optional[str] = None
 def configure_agent(
     agent_id: str,
     workspace: Optional[str] = None,
-    sandbox: Optional[Dict[str, str]] = None,
     tools_allow: Optional[List[str]] = None,
+    provider: Optional[Dict[str, Any]] = None,
+    model: Optional[str] = None,
+    skills: Optional[List[str]] = None,
     config_path: Optional[Path] = None
 ) -> None:
-    """配置 agent 的 workspace、sandbox 和工具。
+    """配置 agent 的 workspace、工具、provider、model 和 skills。
 
     Args:
         agent_id: agent 名称
         workspace: workspace 路径（可选）
-        sandbox: 沙箱配置（可选）
         tools_allow: 工具列表（可选，使用 allow 完全替换）
+        provider: provider 配置（可选）
+        model: model 名称（可选）
+        skills: skills 列表（可选）
         config_path: 配置文件路径（可选，默认 ~/.openclaw/openclaw.json）
     """
     if config_path is None:
@@ -124,58 +115,142 @@ def configure_agent(
         agent_config["workspace"] = workspace
         logger.info(f"已配置 agent {agent_id} 的 workspace: {workspace}")
 
-    # 5. 配置 sandbox
-    if sandbox is not None:
-        agent_config["sandbox"] = sandbox
-        logger.info(f"已配置 agent {agent_id} 的 sandbox: {sandbox}")
-
-    # 6. 配置 tools（使用 allow 完全替换）
+    # 5. 配置 tools（使用 allow 完全替换）
     if tools_allow is not None:
         agent_config["tools"] = {"allow": tools_allow}
         logger.info(f"已配置 agent {agent_id} 的工具列表（allow: {len(tools_allow)} 个）")
 
-    # 7. 保存配置文件
+    # 6. 配置 provider（覆盖已有配置）
+    # 注意：OpenClaw 不支持 agent 级别的 providers 配置，跳过
+    # if provider is not None:
+    #     if "providers" not in agent_config:
+    #         agent_config["providers"] = {}
+    #     agent_config["providers"]["trajectory_provider"] = provider
+    #     logger.info(f"已配置 agent {agent_id} 的 provider: trajectory_provider")
+
+    # 7. 配置 model（覆盖已有配置）
+    if model is not None:
+        agent_config["model"] = model
+        logger.info(f"已配置 agent {agent_id} 的 model: {model}")
+
+    # 8. 配置 skills（覆盖已有配置）
+    if skills is not None:
+        agent_config["skills"] = skills
+        logger.info(f"已配置 agent {agent_id} 的 skills: {len(skills)} 个")
+
+    # 9. 保存配置文件
     with open(config_path, 'w', encoding='utf-8') as f:
         json.dump(config, f, indent=2, ensure_ascii=False)
 
 
-def configure_sandbox(
-    agent_ids: List[str],
-    sandbox_config: Dict[str, str],
+def configure_global_skills(
+    extra_dirs: Optional[List[str]] = None,
+    allow_bundled: Optional[List[str]] = None,
     config_path: Optional[Path] = None
 ) -> None:
-    """为多个 agents 批量配置沙箱。
+    """配置全局 skills 设置。
 
     Args:
-        agent_ids: agent ID 列表
-        sandbox_config: 沙箱配置字典
+        extra_dirs: 额外的 skills 目录列表
+        allow_bundled: 允许的内置 skills 列表（空数组表示禁用所有内置 skills）
         config_path: 配置文件路径（可选，默认 ~/.openclaw/openclaw.json）
     """
     if config_path is None:
         config_path = Path.home() / ".openclaw" / "openclaw.json"
 
-    # 读取配置
+    # 读取配置文件
     if config_path.exists():
         with open(config_path, 'r', encoding='utf-8') as f:
             config = json.load(f)
     else:
-        logger.warning(f"配置文件不存在: {config_path}")
-        return
+        config = {}
 
-    # 为每个 agent 配置 sandbox
-    agent_list = config.get("agents", {}).get("list", [])
-    configured_count = 0
+    # 确保 skills 字段存在
+    if "skills" not in config:
+        config["skills"] = {}
 
-    for agent_config in agent_list:
-        if agent_config.get("id") in agent_ids:
-            agent_config["sandbox"] = sandbox_config
-            configured_count += 1
+    # 配置 extraDirs
+    if extra_dirs is not None:
+        if "load" not in config["skills"]:
+            config["skills"]["load"] = {}
+        config["skills"]["load"]["extraDirs"] = extra_dirs
+        logger.info(f"已配置全局 skills.load.extraDirs: {len(extra_dirs)} 个目录")
 
-    # 保存配置
+    # 配置 allowBundled
+    if allow_bundled is not None:
+        config["skills"]["allowBundled"] = allow_bundled
+        logger.info(f"已配置全局 skills.allowBundled: {len(allow_bundled)} 个内置 skill")
+
+    # 保存配置文件
     with open(config_path, 'w', encoding='utf-8') as f:
         json.dump(config, f, indent=2, ensure_ascii=False)
 
-    logger.info(f"已为 {configured_count}/{len(agent_ids)} 个 agents 配置沙箱")
+
+def configure_global_provider(
+    provider_name: str,
+    base_url: str,
+    api_key: str,
+    model_id: str,
+    context_window: int = 200000,
+    max_tokens: int = 200000,
+    config_path: Optional[Path] = None
+) -> None:
+    """配置全局 provider。
+
+    Args:
+        provider_name: provider 名称
+        base_url: API 基础 URL
+        api_key: API key
+        model_id: 模型 ID
+        context_window: 上下文窗口大小（默认 200000）
+        max_tokens: 最大生成 token 数（默认 200000）
+        config_path: 配置文件路径（可选，默认 ~/.openclaw/openclaw.json）
+    """
+    if config_path is None:
+        config_path = Path.home() / ".openclaw" / "openclaw.json"
+
+    # 读取配置文件
+    if config_path.exists():
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+    else:
+        config = {}
+
+    # 确保 models.providers 字段存在
+    if "models" not in config:
+        config["models"] = {}
+    if "providers" not in config["models"]:
+        config["models"]["providers"] = {}
+
+    # 配置 provider
+    config["models"]["providers"][provider_name] = {
+        "baseUrl": base_url,
+        "apiKey": api_key,
+        "api": "anthropic-messages",
+        "models": [
+            {
+                "id": model_id,
+                "name": model_id,
+                "api": "anthropic-messages",
+                "reasoning": False,
+                "input": ["text"],
+                "cost": {
+                    "input": 0,
+                    "output": 0,
+                    "cacheRead": 0,
+                    "cacheWrite": 0
+                },
+                "contextWindow": context_window,
+                "maxTokens": max_tokens
+            }
+        ]
+    }
+
+    # 保存配置文件
+    with open(config_path, 'w', encoding='utf-8') as f:
+        json.dump(config, f, indent=2, ensure_ascii=False)
+
+    logger.info(f"已配置全局 provider: {provider_name}")
 
 
 def delete_worker_agents(worker_prefix: str = "gendata-worker") -> List[str]:
@@ -223,7 +298,7 @@ def ensure_agents(
         worker_prefix: worker agent 前缀
         workspace_root: workspace 根目录
         force_recreate: 是否强制删除所有 worker agents 重新创建
-        add_tools: 是否自动配置 sandbox 和工具（默认 True）
+        add_tools: 是否自动配置工具（默认 True）
 
     Returns:
         包含 created、existing、deleted 列表的字典
@@ -269,7 +344,7 @@ def ensure_agents(
             raise RuntimeError(f"Failed to create agent {agent_id}: {result.stderr}")
         created.append(agent_id)
 
-    # 配置 workspace 和工具（不配置 sandbox）
+    # 配置 workspace 和工具
     if add_tools:
         all_agent_ids = [f"{worker_prefix}-{i+1}" for i in range(num_agents)]
         logger.info(f"开始配置 {len(all_agent_ids)} 个 agents...")
@@ -278,7 +353,6 @@ def ensure_agents(
             configure_agent(
                 agent_id,
                 workspace=str(desired_workspace),
-                sandbox=None,  # 不配置 sandbox
                 tools_allow=WORKER_TOOLS_ALLOW
             )
         logger.info(
