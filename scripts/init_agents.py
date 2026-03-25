@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 from typing import Dict, List, Any, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import os
 import sys
@@ -101,29 +102,70 @@ def generate_all_agents_tools(
     agent_ids: List[str],
     output_file: str,
     project_root: Path,
-    timeout: int = 180
+    timeout: int = 180,
+    max_workers: int = 10,
+    reuse_tools: bool = False
 ) -> Dict[str, List[Dict[str, Any]]]:
-    """批量生成多个 agent 的工具列表并保存。
+    """批量生成多个 agent 的工具列表并保存（并发版本）。
 
     Args:
         agent_ids: agent 名称列表
         output_file: 输出文件路径 (output/tools/tools_all_agents.json)
         project_root: 项目根目录
         timeout: 每个 agent 的超时时间
+        max_workers: 最大并发线程数（默认 10）
+        reuse_tools: 是否复用同一个工具列表（默认 False）
 
     Returns:
         按 agent 分组的工具字典: {agent_id: [tools...]}
     """
     tools_by_agent = {}
 
-    for agent_id in agent_ids:
+    if reuse_tools:
+        # 优化模式：只生成一次工具列表，然后复用给所有 agents
+        logger.info(f"复用模式：只生成一次工具列表，然后复用给所有 {len(agent_ids)} 个 agents...")
+
+        # 使用第一个 agent 生成工具列表
+        reference_agent = agent_ids[0] if agent_ids else None
+        if not reference_agent:
+            logger.warning("agent_ids 为空，无法生成工具列表")
+            return tools_by_agent
+
         try:
-            tools = generate_agent_tools(agent_id, project_root, timeout)
-            tools_by_agent[agent_id] = tools
+            logger.info(f"使用 {reference_agent} 生成工具列表...")
+            shared_tools = generate_agent_tools(reference_agent, project_root, timeout)
+
+            # 复用给所有 agents
+            for agent_id in agent_ids:
+                tools_by_agent[agent_id] = shared_tools
+
+            logger.info(f"✓ 已将工具列表（{len(shared_tools)} 个工具）复用给所有 {len(agent_ids)} 个 agents")
+
         except Exception as e:
-            logger.error(f"生成 agent {agent_id} 的工具列表失败: {e}")
-            # 失败时记录空列表，允许后续使用 session 元数据兜底
-            tools_by_agent[agent_id] = []
+            logger.error(f"生成工具列表失败: {e}")
+            # 失败时所有 agent 都记录空列表
+            for agent_id in agent_ids:
+                tools_by_agent[agent_id] = []
+
+    else:
+        # 标准模式：并发生成每个 agent 的工具列表
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # 提交所有任务
+            future_to_agent = {
+                executor.submit(generate_agent_tools, agent_id, project_root, timeout): agent_id
+                for agent_id in agent_ids
+            }
+
+            # 收集结果
+            for future in as_completed(future_to_agent):
+                agent_id = future_to_agent[future]
+                try:
+                    tools = future.result()
+                    tools_by_agent[agent_id] = tools
+                except Exception as e:
+                    logger.error(f"生成 agent {agent_id} 的工具列表失败: {e}")
+                    # 失败时记录空列表，允许后续使用 session 元数据兜底
+                    tools_by_agent[agent_id] = []
 
     # 保存到文件
     output_path = Path(output_file)
@@ -251,6 +293,8 @@ def init_agents(
     project_root: Path = None,
     tools_output_file: str = None,
     add_tools: bool = True,
+    max_workers: int = 10,
+    reuse_tools: bool = False,
 ) -> bool:
     """初始化多个 OpenClaw agent，可选生成工具列表。
 
@@ -264,6 +308,8 @@ def init_agents(
         project_root: 项目根目录
         tools_output_file: 工具输出文件路径
         add_tools: 是否自动配置工具白名单（默认 True）
+        max_workers: 最大并发线程数（默认 10）
+        reuse_tools: 是否复用同一个工具列表（默认 False，可大幅加快初始化速度）
 
     Returns:
         是否成功
@@ -303,18 +349,41 @@ def init_agents(
     new_agent_ids = result["created"]
 
     if new_agent_ids:
-        logger.info(f"修改 {len(new_agent_ids)} 个新 agents 的 AGENTS.md...")
-        for agent_id in new_agent_ids:
-            modify_agent_md(agent_id, str(root_dir))
+        logger.info(f"并发修改 {len(new_agent_ids)} 个新 agents 的 AGENTS.md...")
+
+        # 并发修改 AGENTS.md
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [
+                executor.submit(modify_agent_md, agent_id, str(root_dir))
+                for agent_id in new_agent_ids
+            ]
+            # 等待所有任务完成
+            for future in as_completed(futures):
+                try:
+                    future.result()
+                except Exception as e:
+                    logger.error(f"修改 AGENTS.md 失败: {e}")
 
         if not project_root:
             logger.warning("未指定 project_root，跳过 workspace 快照保存")
         else:
             snapshot_dir = project_root / "output" / "workspace_snapshots"
             snapshot_dir.mkdir(parents=True, exist_ok=True)
-            logger.info(f"保存 {len(new_agent_ids)} 个新 agents 的 workspace 快照...")
-            for agent_id in new_agent_ids:
-                save_workspace_snapshot(agent_id, str(root_dir), str(snapshot_dir))
+            logger.info(f"并发保存 {len(new_agent_ids)} 个新 agents 的 workspace 快照...")
+
+            # 并发保存快照
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = [
+                    executor.submit(save_workspace_snapshot, agent_id, str(root_dir), str(snapshot_dir))
+                    for agent_id in new_agent_ids
+                ]
+                # 等待所有任务完成
+                for future in as_completed(futures):
+                    try:
+                        future.result()
+                    except Exception as e:
+                        logger.error(f"保存 workspace 快照失败: {e}")
+
             logger.info(f"✓ 已保存新 agents 的 workspace 快照到 {snapshot_dir}")
     else:
         logger.info("无新建 agents，跳过 AGENTS.md 修改和快照保存")
@@ -364,7 +433,7 @@ def init_agents(
         model = openclaw_config.get("model")
 
         if model_url and model_api_key and model:
-            logger.info(f"配置 {len(all_agent_ids)} 个 agents 的 model 和 skills...")
+            logger.info(f"并发配置 {len(all_agent_ids)} 个 agents 的 model 和 skills...")
             from src.openclaw_wrapper import configure_agent
 
             # 从配置读取 skills 目录
@@ -378,12 +447,24 @@ def init_agents(
             # model 格式：provider_name/model_name
             model_config = f"trajectory_provider/{model}"
 
-            for agent_id in all_agent_ids:
-                configure_agent(
-                    agent_id=agent_id,
-                    model=model_config,
-                    skills=agent_skills
-                )
+            # 并发配置所有 agents
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = [
+                    executor.submit(
+                        configure_agent,
+                        agent_id=agent_id,
+                        model=model_config,
+                        skills=agent_skills
+                    )
+                    for agent_id in all_agent_ids
+                ]
+                # 等待所有任务完成
+                for future in as_completed(futures):
+                    try:
+                        future.result()
+                    except Exception as e:
+                        logger.error(f"配置 agent 失败: {e}")
+
             logger.info(f"✓ 已配置所有 agents 的 model 和 {len(agent_skills)} 个 skills")
         else:
             logger.warning("配置文件中缺少 model_url/model_api_key/model，跳过配置")
@@ -395,19 +476,31 @@ def init_agents(
             return True
 
         if refresh_agents:
-            # 仅刷新指定 agents
-            logger.info(f"刷新 agents 的工具列表: {', '.join(refresh_agents)}")
-            for agent_id in refresh_agents:
-                try:
-                    update_agent_tools(agent_id, tools_output_file, project_root)
-                except Exception as e:
-                    logger.error(f"刷新 agent {agent_id} 工具列表失败: {e}")
+            # 并发刷新指定 agents
+            logger.info(f"并发刷新 {len(refresh_agents)} 个 agents 的工具列表: {', '.join(refresh_agents)}")
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = [
+                    executor.submit(update_agent_tools, agent_id, tools_output_file, project_root)
+                    for agent_id in refresh_agents
+                ]
+                # 等待所有任务完成
+                for future in as_completed(futures):
+                    try:
+                        future.result()
+                    except Exception as e:
+                        logger.error(f"刷新工具列表失败: {e}")
         elif refresh_tools:
-            # 刷新所有 agents
+            # 刷新所有 agents（已经是并发版本）
             agent_ids = [f"{worker_prefix}-{i+1}" for i in range(num_agents)]
-            logger.info(f"生成所有 {num_agents} 个 agents 的工具列表...")
+            logger.info(f"并发生成所有 {num_agents} 个 agents 的工具列表...")
             try:
-                generate_all_agents_tools(agent_ids, tools_output_file, project_root)
+                generate_all_agents_tools(
+                    agent_ids,
+                    tools_output_file,
+                    project_root,
+                    max_workers=max_workers,
+                    reuse_tools=reuse_tools
+                )
             except Exception as e:
                 logger.error(f"批量生成工具列表失败: {e}")
                 return False
@@ -444,6 +537,11 @@ def main():
         help="初始化后生成所有 agent 的工具列表"
     )
     parser.add_argument(
+        "--reuse-tools",
+        action="store_true",
+        help="复用同一个工具列表给所有 agents（与 --refresh-tools 配合使用，可大幅减少初始化时间）"
+    )
+    parser.add_argument(
         "--refresh-agent",
         type=str,
         action="append",
@@ -454,6 +552,12 @@ def main():
         action="store_true",
         default=True,
         help="自动配置 worker agent 的工具白名单（默认: true）"
+    )
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=10,
+        help="最大并发线程数（默认: 10）。I/O 密集型任务，不需要对应的 CPU 核心数"
     )
 
     args = parser.parse_args()
@@ -480,7 +584,9 @@ def main():
         refresh_agents=args.refresh_agent,
         project_root=project_root,
         tools_output_file=tools_output,
-        add_tools=args.add_tools
+        add_tools=args.add_tools,
+        max_workers=args.max_workers,
+        reuse_tools=args.reuse_tools
     )
     if success:
         logger.info("✓ 所有 agent 初始化成功")
