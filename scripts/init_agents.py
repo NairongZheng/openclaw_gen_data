@@ -8,9 +8,14 @@ import tempfile
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
+import os
 import sys
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# 防御性处理 __file__ (容器环境兼容)
+if '__file__' in globals():
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+else:
+    sys.path.insert(0, str(Path(os.getcwd())))
 
 from src.openclaw_wrapper import ensure_agents, resolve_workspace_root
 from src.config import load_config
@@ -455,7 +460,15 @@ def main():
 
     # 读取配置获取输出路径
     config = load_config()
-    project_root = Path(__file__).parent.parent
+    # 防御性处理 __file__ (容器环境兼容)
+
+    if '__file__' in globals():
+
+        project_root = Path(__file__).parent.parent
+
+    else:
+
+        project_root = Path(os.getcwd())
     tools_output = config["paths"].get("tools_cache_file", "output/tools/tools_all_agents.json")
 
     success = init_agents(

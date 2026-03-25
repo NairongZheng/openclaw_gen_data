@@ -4,14 +4,20 @@ import json
 import logging
 import queue
 import shutil
+import signal
 import subprocess
+import os
 import sys
 import threading
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# 防御性处理 __file__ (容器环境兼容)
+if '__file__' in globals():
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+else:
+    sys.path.insert(0, str(Path(os.getcwd())))
 
 from src.config import load_config
 from src.intent_loader import load_intents
@@ -21,6 +27,101 @@ from src.converter import DataConverter
 from src.utils import ensure_dir, load_json, save_json, setup_logging
 
 logger = logging.getLogger(__name__)
+
+# 全局变量用于优雅退出
+_shutdown_requested = threading.Event()
+_active_agents: List[str] = []
+_active_config: Optional[Dict[str, Any]] = None
+_executor: Optional[ThreadPoolExecutor] = None
+
+
+def cleanup_agents(agent_ids: List[str], config: Dict[str, Any]) -> None:
+    """清理所有 agents 的 session、锁文件，并恢复 workspace 快照。
+
+    Args:
+        agent_ids: 要清理的 agent 名称列表
+        config: 配置字典
+    """
+    logger.info("开始清理 agents 资源...")
+
+    # 0. 杀死所有正在运行的 openclaw 子进程
+    try:
+        import psutil
+        current_process = psutil.Process()
+        children = current_process.children(recursive=True)
+        for child in children:
+            try:
+                if 'openclaw' in ' '.join(child.cmdline()).lower():
+                    logger.info(f"终止 openclaw 子进程 {child.pid}")
+                    child.terminate()
+            except Exception:
+                pass
+        # 等待最多 2 秒让进程正常退出
+        import time
+        time.sleep(0.5)
+        for child in children:
+            try:
+                if child.is_running():
+                    child.kill()
+            except Exception:
+                pass
+    except ImportError:
+        # psutil 不可用，跳过
+        logger.warning("psutil 不可用，跳过子进程清理")
+    except Exception as e:
+        logger.warning(f"清理子进程失败: {e}")
+
+    for agent_name in agent_ids:
+        try:
+            # 1. Reset agent session
+            wrapper = OpenClawWrapper(agent_name)
+            wrapper.reset_main_session()
+            logger.debug(f"已重置 {agent_name} 的 session")
+        except Exception as e:
+            logger.warning(f"重置 {agent_name} session 失败: {e}")
+
+        try:
+            # 2. 清理锁文件
+            agent_dir = Path.home() / ".openclaw" / "agents" / agent_name / "sessions"
+            if agent_dir.exists():
+                lock_files = list(agent_dir.glob("*.lock"))
+                for lock_file in lock_files:
+                    try:
+                        lock_file.unlink()
+                        logger.debug(f"已删除锁文件: {lock_file.name}")
+                    except Exception as e:
+                        logger.warning(f"删除锁文件失败 {lock_file}: {e}")
+        except Exception as e:
+            logger.warning(f"清理 {agent_name} 锁文件失败: {e}")
+
+        try:
+            # 3. 恢复 workspace 快照
+            restore_workspace_snapshot(agent_name, config)
+        except Exception as e:
+            logger.warning(f"恢复 {agent_name} workspace 快照失败: {e}")
+
+    logger.info(f"✓ 已清理 {len(agent_ids)} 个 agents")
+
+
+def signal_handler(signum, frame):
+    """信号处理器 - 捕获 Ctrl+C 和 SIGTERM。"""
+    signal_name = "SIGINT" if signum == signal.SIGINT else "SIGTERM"
+    logger.warning(f"\n收到 {signal_name} 信号，正在优雅退出...")
+
+    _shutdown_requested.set()
+
+    # 终止线程池
+    if _executor:
+        logger.info("正在终止所有 worker 线程...")
+        _executor.shutdown(wait=False, cancel_futures=True)
+
+    # 清理所有 agents
+    if _active_agents and _active_config:
+        cleanup_agents(_active_agents, _active_config)
+
+    logger.info("清理完成，强制退出程序")
+    # 使用 os._exit() 强制退出，不等待线程
+    os._exit(0)
 
 
 class ProgressTracker:
@@ -176,7 +277,15 @@ def restore_workspace_snapshot(agent_name: str, config: Dict[str, Any]) -> None:
     workspace = expected_agent_workspace(agent_name, str(root_dir))
 
     # 快照路径
-    project_root = Path(__file__).parent.parent
+    # 防御性处理 __file__ (容器环境兼容)
+
+    if '__file__' in globals():
+
+        project_root = Path(__file__).parent.parent
+
+    else:
+
+        project_root = Path(os.getcwd())
     snapshot_path = project_root / "output" / "workspace_snapshots" / agent_name
 
     if not snapshot_path.exists():
@@ -361,6 +470,8 @@ def worker_loop(
 
 
 def main():
+    global _active_agents, _active_config, _executor
+
     parser = argparse.ArgumentParser(description="OpenClaw 数据生成")
     parser.add_argument("--config", default="config/config.yaml", help="配置文件")
     parser.add_argument("--limit", type=int, help="限制处理数量")
@@ -369,6 +480,12 @@ def main():
     args = parser.parse_args()
 
     config = load_config(args.config)
+    _active_config = config  # 设置全局配置
+
+    # 注册信号处理器
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
     setup_logging(config["paths"]["logs_dir"])
     ensure_dir(config["paths"]["output_dir"])
     ensure_dir(config["paths"]["sessions_dir"])
@@ -397,7 +514,15 @@ def main():
     # 如果需要刷新工具列表，重新生成所有 agents 的工具
     if args.refresh_tools:
         from scripts.init_agents import generate_all_agents_tools
-        project_root = Path(__file__).parent.parent
+        # 防御性处理 __file__ (容器环境兼容)
+
+        if '__file__' in globals():
+
+            project_root = Path(__file__).parent.parent
+
+        else:
+
+            project_root = Path(os.getcwd())
         tools_cache_file = config["paths"]["tools_cache_file"]
         worker_ids = [f"{worker_prefix}-{i+1}" for i in range(num_workers)]
 
@@ -425,12 +550,16 @@ def main():
     logger.info(f"并发数: {num_workers}")
     logger.info(f"待处理 intents: {len(pending_intents)}")
 
+    # 设置活跃的 agent 列表（用于 Ctrl+C 清理）
+    _active_agents = [f"{worker_prefix}-{i+1}" for i in range(num_workers)]
+
     task_queue: "queue.Queue[Dict[str, Any]]" = queue.Queue()
     for intent in pending_intents:
         task_queue.put(intent)
 
     results: List[Dict[str, Any]] = []
     with ThreadPoolExecutor(max_workers=num_workers) as executor:
+        _executor = executor  # 设置全局 executor（用于 Ctrl+C 终止）
         futures = []
         for worker_index in range(1, num_workers + 1):
             agent_name = f"{worker_prefix}-{worker_index}"
@@ -462,6 +591,10 @@ def main():
         },
         f"{config['paths']['output_dir']}/summary.json",
     )
+
+    # 正常退出时清理所有 agents
+    logger.info("正常退出，清理 agents 资源...")
+    cleanup_agents(_active_agents, config)
 
 
 if __name__ == "__main__":
