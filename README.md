@@ -118,30 +118,30 @@ paths:
 
 ### 1. 初始化 agents
 
-创建 agents 并配置工具（默认配置19个内置工具）：
+创建 agents 并配置工具（默认配置19个内置工具），默认生成工具列表：
 
 ```bash
-# 推荐：使用工具复用模式（最快）
-python scripts/init_agents.py --num-agents 30 --refresh-tools --reuse-tools
-
-# 从 30 扩展到 60（保留已有的，只创建新的）
-python scripts/init_agents.py --num-agents 60 --refresh-tools --reuse-tools
-
-# 强制删除并重建
-python scripts/init_agents.py --num-agents 30 --force-recreate --refresh-tools --reuse-tools
-
-# 自定义并发数
-python scripts/init_agents.py --num-agents 60 --refresh-tools --max-workers 20
-
-# 刷新单个 agent 的工具列表
-python scripts/init_agents.py --refresh-agent gendata-worker-1
+python scripts/init_agents.py --num-agents 60 --force-recreate --refresh-tools
+python scripts/init_agents.py --num-agents 30
 ```
 
-参数说明：
-- `--refresh-tools`：生成工具列表
-- `--reuse-tools`：复用同一个工具列表（推荐，大幅提升速度）
-- `--max-workers N`：并发线程数（默认 10）
-- `--force-recreate`：强制重建所有 agents
+创建 agents + 生成工具列表：
+
+```bash
+python scripts/init_agents.py --num-agents 30 --refresh-tools
+```
+
+强制删除并重建所有 worker agents：
+
+```bash
+python scripts/init_agents.py --num-agents 30 --force-recreate
+```
+
+刷新单个 agent 的工具列表：
+
+```bash
+python scripts/init_agents.py --refresh-agent gendata-worker-1
+```
 
 ### 2. 正式运行
 
