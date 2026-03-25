@@ -11,8 +11,10 @@ openclaw:
   model_url: "xxx"
   model_api_key: "xxx"
   model: "claude-sonnet-4-6"
+  api: "openai-completions"
   context_window: 200000 
   max_tokens: 8192 
+
 
 # ============== LLM API 配置 ==============
 llm:

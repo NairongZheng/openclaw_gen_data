@@ -121,7 +121,7 @@ paths:
 创建 agents 并配置工具（默认配置19个内置工具），默认生成工具列表：
 
 ```bash
-python scripts/init_agents.py --num-agents 5 --force-recreate --refresh-tools
+python scripts/init_agents.py --num-agents 60 --force-recreate --refresh-tools
 python scripts/init_agents.py --num-agents 30
 ```
 

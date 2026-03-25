@@ -440,7 +440,10 @@ class OpenClawWrapper:
         if thinking:
             cmd.extend(["--thinking", thinking])
 
-        logger.info(f"Sending message to agent {self.agent_name}")
+        # 添加 --timeout 参数，覆盖 OpenClaw Gateway 的默认 600s 超时
+        cmd.extend(["--timeout", str(timeout)])
+
+        logger.info(f"Sending message to agent {self.agent_name} (timeout={timeout}s)")
 
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
