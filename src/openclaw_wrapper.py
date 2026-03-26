@@ -10,7 +10,10 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 
-# Worker 工具列表（使用 allow 完全替换，独立配置）
+DEFAULT_OPENCLAW_CONFIG_PATH = Path.home() / ".openclaw" / "openclaw.json"
+
+
+# Worker 工具默认 allowlist（配置缺失时兜底）
 WORKER_TOOLS_ALLOW = [
     "read", "write", "edit", "apply_patch",
     "exec", "process",
@@ -20,6 +23,28 @@ WORKER_TOOLS_ALLOW = [
     "session_status", "subagents", "agents_list",
     "image", "tts"
 ]
+
+
+def get_openclaw_config_path(config_path: Optional[Path] = None) -> Path:
+    """返回 OpenClaw 配置文件路径。"""
+    return config_path or DEFAULT_OPENCLAW_CONFIG_PATH
+
+
+def load_openclaw_config(config_path: Optional[Path] = None, default: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """加载 OpenClaw 配置文件。"""
+    resolved_path = get_openclaw_config_path(config_path)
+    if resolved_path.exists():
+        with open(resolved_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return dict(default or {})
+
+
+def save_openclaw_config(config: Dict[str, Any], config_path: Optional[Path] = None) -> None:
+    """保存 OpenClaw 配置文件。"""
+    resolved_path = get_openclaw_config_path(config_path)
+    resolved_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(resolved_path, 'w', encoding='utf-8') as f:
+        json.dump(config, f, indent=2, ensure_ascii=False)
 
 
 def _extract_json_payload(raw_text: str) -> Any:
@@ -66,7 +91,6 @@ def configure_agent(
     agent_id: str,
     workspace: Optional[str] = None,
     tools_allow: Optional[List[str]] = None,
-    provider: Optional[Dict[str, Any]] = None,
     model: Optional[str] = None,
     skills: Optional[List[str]] = None,
     config_path: Optional[Path] = None
@@ -77,20 +101,11 @@ def configure_agent(
         agent_id: agent 名称
         workspace: workspace 路径（可选）
         tools_allow: 工具列表（可选，使用 allow 完全替换）
-        provider: provider 配置（可选）
         model: model 名称（可选）
         skills: skills 列表（可选）
         config_path: 配置文件路径（可选，默认 ~/.openclaw/openclaw.json）
     """
-    if config_path is None:
-        config_path = Path.home() / ".openclaw" / "openclaw.json"
-
-    # 1. 读取配置文件
-    if config_path.exists():
-        with open(config_path, 'r', encoding='utf-8') as f:
-            config = json.load(f)
-    else:
-        config = {"agents": {"list": []}}
+    config = load_openclaw_config(config_path, default={"agents": {"list": []}})
 
     # 2. 确保 agents.list 存在
     if "agents" not in config:
@@ -139,8 +154,7 @@ def configure_agent(
         logger.info(f"已配置 agent {agent_id} 的 skills: {len(skills)} 个")
 
     # 9. 保存配置文件
-    with open(config_path, 'w', encoding='utf-8') as f:
-        json.dump(config, f, indent=2, ensure_ascii=False)
+    save_openclaw_config(config, config_path)
 
 
 def configure_global_skills(
@@ -155,15 +169,7 @@ def configure_global_skills(
         allow_bundled: 允许的内置 skills 列表（空数组表示禁用所有内置 skills）
         config_path: 配置文件路径（可选，默认 ~/.openclaw/openclaw.json）
     """
-    if config_path is None:
-        config_path = Path.home() / ".openclaw" / "openclaw.json"
-
-    # 读取配置文件
-    if config_path.exists():
-        with open(config_path, 'r', encoding='utf-8') as f:
-            config = json.load(f)
-    else:
-        config = {}
+    config = load_openclaw_config(config_path)
 
     # 确保 skills 字段存在
     if "skills" not in config:
@@ -182,8 +188,7 @@ def configure_global_skills(
         logger.info(f"已配置全局 skills.allowBundled: {len(allow_bundled)} 个内置 skill")
 
     # 保存配置文件
-    with open(config_path, 'w', encoding='utf-8') as f:
-        json.dump(config, f, indent=2, ensure_ascii=False)
+    save_openclaw_config(config, config_path)
 
 
 def configure_global_provider(
@@ -191,6 +196,7 @@ def configure_global_provider(
     base_url: str,
     api_key: str,
     model_id: str,
+    provider_api: str = "anthropic-messages",
     context_window: int = 200000,
     max_tokens: int = 200000,
     config_path: Optional[Path] = None
@@ -202,19 +208,12 @@ def configure_global_provider(
         base_url: API 基础 URL
         api_key: API key
         model_id: 模型 ID
+        provider_api: provider API 类型
         context_window: 上下文窗口大小（默认 200000）
         max_tokens: 最大生成 token 数（默认 200000）
         config_path: 配置文件路径（可选，默认 ~/.openclaw/openclaw.json）
     """
-    if config_path is None:
-        config_path = Path.home() / ".openclaw" / "openclaw.json"
-
-    # 读取配置文件
-    if config_path.exists():
-        with open(config_path, 'r', encoding='utf-8') as f:
-            config = json.load(f)
-    else:
-        config = {}
+    config = load_openclaw_config(config_path)
 
     # 确保 models.providers 字段存在
     if "models" not in config:
@@ -226,12 +225,12 @@ def configure_global_provider(
     config["models"]["providers"][provider_name] = {
         "baseUrl": base_url,
         "apiKey": api_key,
-        "api": "anthropic-messages",
+        "api": provider_api,
         "models": [
             {
                 "id": model_id,
                 "name": model_id,
-                "api": "anthropic-messages",
+                "api": provider_api,
                 "reasoning": False,
                 "input": ["text"],
                 "cost": {
@@ -247,8 +246,7 @@ def configure_global_provider(
     }
 
     # 保存配置文件
-    with open(config_path, 'w', encoding='utf-8') as f:
-        json.dump(config, f, indent=2, ensure_ascii=False)
+    save_openclaw_config(config, config_path)
 
     logger.info(f"已配置全局 provider: {provider_name}")
 
@@ -290,6 +288,7 @@ def ensure_agents(
     workspace_root: Optional[str] = None,
     force_recreate: bool = False,
     add_tools: bool = True,
+    tools_allow: Optional[List[str]] = None,
 ) -> Dict[str, List[str]]:
     """确保所需数量的 worker agents 存在并使用独立 workspace。
 
@@ -299,6 +298,7 @@ def ensure_agents(
         workspace_root: workspace 根目录
         force_recreate: 是否强制删除所有 worker agents 重新创建
         add_tools: 是否自动配置工具（默认 True）
+        tools_allow: worker 工具 allowlist；为空时使用默认列表
 
     Returns:
         包含 created、existing、deleted 列表的字典
@@ -346,6 +346,7 @@ def ensure_agents(
 
     # 配置 workspace 和工具
     if add_tools:
+        effective_tools_allow = WORKER_TOOLS_ALLOW if tools_allow is None else tools_allow
         all_agent_ids = [f"{worker_prefix}-{i+1}" for i in range(num_agents)]
         logger.info(f"开始配置 {len(all_agent_ids)} 个 agents...")
         for agent_id in all_agent_ids:
@@ -353,10 +354,10 @@ def ensure_agents(
             configure_agent(
                 agent_id,
                 workspace=str(desired_workspace),
-                tools_allow=WORKER_TOOLS_ALLOW
+                tools_allow=effective_tools_allow
             )
         logger.info(
-            f"已完成配置（workspace + {len(WORKER_TOOLS_ALLOW)} 个工具）"
+            f"已完成配置（workspace + {len(effective_tools_allow)} 个工具）"
         )
 
     return {"created": created, "existing": existing, "deleted": deleted}

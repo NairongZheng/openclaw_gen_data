@@ -1,6 +1,5 @@
 """主生成脚本 - 生成、归档、转换、resume 一体化。"""
 import argparse
-import json
 import logging
 import queue
 import shutil
@@ -33,6 +32,35 @@ _shutdown_requested = threading.Event()
 _active_agents: List[str] = []
 _active_config: Optional[Dict[str, Any]] = None
 _executor: Optional[ThreadPoolExecutor] = None
+
+
+def resolve_project_root() -> Path:
+    """解析项目根目录。"""
+    if '__file__' in globals():
+        return Path(__file__).parent.parent
+    return Path(os.getcwd())
+
+
+def get_workspace_snapshot_dir(project_root: Optional[Path] = None) -> Path:
+    """返回 workspace 快照根目录。"""
+    root = project_root or resolve_project_root()
+    return root / "output" / "workspace_snapshots"
+
+
+def create_llm_client(config: Dict[str, Any]) -> LLMClient:
+    """根据配置创建 LLM 客户端。"""
+    llm_config = config["llm"]
+    return LLMClient(
+        base_url=llm_config["base_url"],
+        api_key=llm_config["api_key"],
+        model=llm_config["model"],
+        temperature=llm_config.get("temperature", 0.7),
+        max_tokens=llm_config.get("max_tokens"),
+        timeout=llm_config.get("timeout"),
+        retry_attempts=llm_config.get("retry_attempts", 3),
+        retry_base_delay=llm_config.get("retry_base_delay", 1.0),
+        retry_max_delay=llm_config.get("retry_max_delay", 8.0),
+    )
 
 
 def cleanup_agents(agent_ids: List[str], config: Dict[str, Any]) -> None:
@@ -154,23 +182,6 @@ class ProgressTracker:
             save_json(self.data, str(self.progress_file))
 
 
-def load_tools_catalog(cache_file: str) -> List[Dict[str, Any]]:
-    """加载预生成的工具定义（兼容旧格式）。
-
-    注意：此函数用于加载所有 agent 共享的工具列表（旧格式）
-    新格式应使用 load_agent_tools()
-    """
-    cache_path = Path(cache_file)
-    try:
-        if cache_path.exists():
-            return load_json(str(cache_path))
-        logger.info("未发现 tools catalog")
-        return []
-    except Exception as exc:
-        logger.warning("加载 tools catalog 失败，将退回到 session 元数据兜底: %s", exc)
-        return []
-
-
 def load_agent_tools(cache_file: str, agent_id: str) -> List[Dict[str, Any]]:
     """从缓存文件加载特定 agent 的工具列表。
 
@@ -202,53 +213,6 @@ def load_agent_tools(cache_file: str, agent_id: str) -> List[Dict[str, Any]]:
         return []
 
 
-def generate_tools_catalog(project_root: Path, cache_file: str) -> List[Dict[str, Any]]:
-    """调用本地 dump_tools 脚本生成完整 tools catalog。"""
-    cache_path = Path(cache_file)
-    ensure_dir(str(cache_path.parent))
-
-    script_path = project_root / "tools" / "fetch_tools" / "dump_tools.mjs"
-    if not script_path.exists():
-        raise FileNotFoundError(f"Tools dump script not found: {script_path}")
-
-    result = subprocess.run(
-        ["node", str(script_path)],
-        cwd=str(project_root),
-        capture_output=True,
-        text=True,
-        timeout=180,
-    )
-
-    if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or "tools catalog generation failed")
-
-    tools_catalog = json.loads(result.stdout)
-    save_json(tools_catalog, str(cache_path))
-    return tools_catalog
-
-
-def ensure_tools_catalog(project_root: Path, cache_file: str, refresh: bool = False) -> List[Dict[str, Any]]:
-    """确保完整 tools catalog 可用；失败时退回 session 元数据兜底。"""
-    cache_path = Path(cache_file)
-    if refresh and cache_path.exists():
-        logger.info("按请求刷新 tools catalog: %s", cache_path)
-        cache_path.unlink()
-
-    tools_catalog = load_tools_catalog(cache_file)
-    if tools_catalog:
-        logger.info("已加载 tools catalog，共 %s 个工具", len(tools_catalog))
-        return tools_catalog
-
-    try:
-        logger.info("开始自动生成完整 tools catalog...")
-        tools_catalog = generate_tools_catalog(project_root, cache_file)
-        logger.info("tools catalog 生成完成，共 %s 个工具", len(tools_catalog))
-        return tools_catalog
-    except Exception as exc:
-        logger.warning("自动生成 tools catalog 失败，将退回到 session 元数据兜底: %s", exc)
-        return []
-
-
 def extract_skills(session_info: Dict[str, Any]) -> List[Dict[str, Any]]:
     """从 sessions.json 快照中提取 skills。"""
     skills_snapshot = (session_info or {}).get("skillsSnapshot", {})
@@ -275,18 +239,7 @@ def restore_workspace_snapshot(agent_name: str, config: Dict[str, Any]) -> None:
     workspace_root = config["openclaw"].get("workspace_root")
     root_dir = resolve_workspace_root(workspace_root)
     workspace = expected_agent_workspace(agent_name, str(root_dir))
-
-    # 快照路径
-    # 防御性处理 __file__ (容器环境兼容)
-
-    if '__file__' in globals():
-
-        project_root = Path(__file__).parent.parent
-
-    else:
-
-        project_root = Path(os.getcwd())
-    snapshot_path = project_root / "output" / "workspace_snapshots" / agent_name
+    snapshot_path = get_workspace_snapshot_dir() / agent_name
 
     if not snapshot_path.exists():
         logger.warning(f"Agent {agent_name} 的快照不存在，跳过恢复: {snapshot_path}")
@@ -326,6 +279,8 @@ def process_intent(
     agent_name: str,
     config: Dict[str, Any],
     tools_catalog: List[Dict[str, Any]],
+    llm: LLMClient,
+    converter: DataConverter,
 ) -> Dict[str, Any]:
     """处理单个 intent。"""
     intent_id = intent_data.get("id", "unknown")
@@ -337,14 +292,6 @@ def process_intent(
         restore_workspace_snapshot(agent_name, config)
 
         openclaw.reset_main_session()
-
-        llm = LLMClient(
-            base_url=config["llm"]["base_url"],
-            api_key=config["llm"]["api_key"],
-            model=config["llm"]["model"],
-            temperature=config["llm"]["temperature"]
-        )
-        converter = DataConverter()
 
         conversation_history = []
         max_turns = config["generation"].get("max_turns", 20)
@@ -389,11 +336,12 @@ def process_intent(
         if not session_info:
             raise RuntimeError(f"[{agent_name}] 未找到 session 信息，无法归档")
 
-        sessions_dir = Path(config["paths"]["sessions_dir"])
+        paths_config = config["paths"]
+        sessions_dir = Path(paths_config["sessions_dir"])
         archived_session_file = sessions_dir / f"intent_{intent_id}__{agent_name}__{session_info['sessionId']}.jsonl"
         archive_meta = openclaw.archive_current_session(str(archived_session_file))
 
-        output_file = Path(config["paths"]["middle_format_dir"]) / f"intent_{intent_id}.json"
+        output_file = Path(paths_config["middle_format_dir"]) / f"intent_{intent_id}.json"
         converter.convert_session_to_middle_format(
             session_file=str(archived_session_file),
             intent_data=intent_data,
@@ -425,7 +373,12 @@ def process_intent(
         except Exception as reset_error:
             logger.warning(f"[{agent_name}] reset 失败: {reset_error}")
         logger.error(f"[{agent_name}] ✗ Intent {intent_id} 失败: {e}")
-        return {"intent_id": str(intent_id), "status": "failed", "agent_name": agent_name, "error": str(e)}
+        return {
+            "intent_id": str(intent_id),
+            "status": "failed",
+            "agent_name": agent_name,
+            "error": str(e),
+        }
 
 
 def worker_loop(
@@ -447,8 +400,11 @@ def worker_loop(
     Returns:
         处理结果列表
     """
+
     # 为当前 worker 的 agent 加载工具列表
     worker_tools = load_agent_tools(tools_cache_file, agent_name)
+    llm = create_llm_client(config)
+    converter = DataConverter()
 
     if not worker_tools:
         logger.warning(f"Worker {agent_name} 未找到工具缓存，使用空列表（将退回 session 元数据）")
@@ -461,7 +417,7 @@ def worker_loop(
         except queue.Empty:
             break
 
-        result = process_intent(intent_data, agent_name, config, worker_tools)
+        result = process_intent(intent_data, agent_name, config, worker_tools, llm, converter)
         progress.record(result)
         results.append(result)
         task_queue.task_done()
@@ -480,16 +436,17 @@ def main():
     args = parser.parse_args()
 
     config = load_config(args.config)
+    paths_config = config["paths"]
     _active_config = config  # 设置全局配置
 
     # 注册信号处理器
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    setup_logging(config["paths"]["logs_dir"])
-    ensure_dir(config["paths"]["output_dir"])
-    ensure_dir(config["paths"]["sessions_dir"])
-    ensure_dir(config["paths"]["middle_format_dir"])
+    setup_logging(paths_config["logs_dir"])
+    ensure_dir(paths_config["output_dir"])
+    ensure_dir(paths_config["sessions_dir"])
+    ensure_dir(paths_config["middle_format_dir"])
 
     logger.info("=" * 60)
     logger.info("OpenClaw 数据生成开始")
@@ -503,6 +460,7 @@ def main():
         worker_prefix=worker_prefix,
         workspace_root=workspace_root,
         add_tools=True,  # 生成数据时启用工具白名单
+        tools_allow=config["openclaw"].get("worker_tools_allow"),
     )
     logger.info(
         "worker agents 就绪，已存在 %s 个，新建 %s 个，已删除 %s 个",
@@ -514,16 +472,8 @@ def main():
     # 如果需要刷新工具列表，重新生成所有 agents 的工具
     if args.refresh_tools:
         from scripts.init_agents import generate_all_agents_tools
-        # 防御性处理 __file__ (容器环境兼容)
-
-        if '__file__' in globals():
-
-            project_root = Path(__file__).parent.parent
-
-        else:
-
-            project_root = Path(os.getcwd())
-        tools_cache_file = config["paths"]["tools_cache_file"]
+        project_root = resolve_project_root()
+        tools_cache_file = paths_config["tools_cache_file"]
         worker_ids = [f"{worker_prefix}-{i+1}" for i in range(num_workers)]
 
         logger.info(f"刷新所有 {num_workers} 个 agents 的工具列表...")
@@ -534,13 +484,13 @@ def main():
             logger.error(f"刷新工具列表失败: {e}")
             # 继续执行，使用现有缓存或退回 session 元数据
 
-    intents = load_intents(config["paths"]["intents_file"])
+    intents = load_intents(paths_config["intents_file"])
     logger.info(f"加载 {len(intents)} 个 intents")
 
     if args.limit:
         intents = intents[:args.limit]
 
-    progress = ProgressTracker(config["paths"]["progress_file"])
+    progress = ProgressTracker(paths_config["progress_file"])
     pending_intents = [intent for intent in intents if not progress.is_success(str(intent.get("id", "unknown")))]
 
     if not pending_intents:
@@ -569,7 +519,7 @@ def main():
                 agent_name,
                 task_queue,
                 config,
-                config["paths"]["tools_cache_file"],
+                paths_config["tools_cache_file"],
                 progress
             )
             futures.append(future)
@@ -589,7 +539,7 @@ def main():
             "failed": len(results) - success,
             "results": results,
         },
-        f"{config['paths']['output_dir']}/summary.json",
+        f"{paths_config['output_dir']}/summary.json",
     )
 
     # 正常退出时清理所有 agents

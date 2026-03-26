@@ -19,10 +19,8 @@
 
 import fs from 'fs';
 import path from 'path';
-import { createJiti } from 'jiti';
 import { createRequire } from 'module';
 import { parseArgs } from 'util';
-import { Type } from '@sinclair/typebox';
 
 const req = createRequire(import.meta.url);
 
@@ -102,6 +100,30 @@ if (!OPENCLAW_ROOT) {
   console.error('ERROR: OpenClaw installation not found');
   process.exit(1);
 }
+const openclawRequire = createRequire(path.join(OPENCLAW_ROOT, 'package.json'));
+
+function loadRuntimePackage(spec, { optional = false } = {}) {
+  try {
+    return req(spec);
+  } catch (localError) {
+    try {
+      return openclawRequire(spec);
+    } catch (openclawError) {
+      if (optional) {
+        return null;
+      }
+      throw new Error(
+        `Failed to resolve package "${spec}" from workspace or OpenClaw installation. ` +
+        `Local error: ${localError.message}; OpenClaw error: ${openclawError.message}`
+      );
+    }
+  }
+}
+
+const { Type } = loadRuntimePackage('@sinclair/typebox');
+const jitiModule = loadRuntimePackage('jiti', { optional: true });
+const createJiti = jitiModule?.createJiti ?? null;
+
 const DIST    = path.join(OPENCLAW_ROOT, 'dist');
 const EXT_ROOT = path.join(OPENCLAW_ROOT, 'extensions');
 const PI_TOOLS = path.join(OPENCLAW_ROOT, 'node_modules/@mariozechner/pi-coding-agent/dist/core/tools');
@@ -413,7 +435,9 @@ function getPluginPaths() {
 }
 
 async function extractPluginTools() {
-  const jiti = createJiti(import.meta.url, { moduleCache: false, fsCache: false });
+  const jiti = createJiti
+    ? createJiti(import.meta.url, { moduleCache: false, fsCache: false })
+    : null;
   const ctx  = { config: cfg, agentId: 'main', sessionKey: 'inspector', workspaceDir: '/tmp' };
 
   function makeFakeApi() {
@@ -474,6 +498,10 @@ async function extractPluginTools() {
   for (const { dir, id } of getPluginPaths()) {
     const entry = ['index.js', 'index.ts'].map(f => path.join(dir, f)).find(f => fs.existsSync(f));
     if (!entry) continue;
+    if (entry.endsWith('.ts') && !jiti) {
+      console.error(`WARN: skip TypeScript plugin ${id} because jiti is unavailable`);
+      continue;
+    }
 
     const { api, tools } = makeFakeApi();
     try {

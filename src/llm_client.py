@@ -1,6 +1,8 @@
 """LLM 客户端 - 统一 query 生成逻辑"""
 import json
 import logging
+import random
+import time
 from typing import Dict, Any, List
 from openai import OpenAI
 
@@ -10,7 +12,18 @@ logger = logging.getLogger(__name__)
 class LLMClient:
     """LLM 客户端 - 统一处理所有 query 生成"""
 
-    def __init__(self, base_url: str, api_key: str, model: str, temperature: float = 0.7):
+    def __init__(
+        self,
+        base_url: str,
+        api_key: str,
+        model: str,
+        temperature: float = 0.7,
+        max_tokens: int | None = None,
+        timeout: float | None = None,
+        retry_attempts: int = 3,
+        retry_base_delay: float = 1.0,
+        retry_max_delay: float = 8.0,
+    ):
         """初始化 LLM 客户端
 
         Args:
@@ -18,10 +31,23 @@ class LLMClient:
             api_key: API 密钥
             model: 模型名称
             temperature: 温度参数
+            max_tokens: 最大生成 token 数
+            timeout: 请求超时时间（秒）
+            retry_attempts: 最大重试次数（包含首次请求）
+            retry_base_delay: 重试基础退避时间（秒）
+            retry_max_delay: 重试最大等待时间（秒）
         """
-        self.client = OpenAI(base_url=base_url, api_key=api_key)
+        client_kwargs = {"base_url": base_url, "api_key": api_key}
+        if timeout is not None:
+            client_kwargs["timeout"] = timeout
+
+        self.client = OpenAI(**client_kwargs)
         self.model = model
         self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.retry_attempts = max(1, retry_attempts)
+        self.retry_base_delay = max(0.0, retry_base_delay)
+        self.retry_max_delay = max(self.retry_base_delay, retry_max_delay)
 
     def generate_next_query(
         self,
@@ -62,22 +88,55 @@ class LLMClient:
             ),
         })
 
-        # 调用 LLM
-        try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=self.temperature,
-                response_format={"type": "json_object"},
-            )
+        last_error: Exception | None = None
 
-            result = json.loads(response.choices[0].message.content)
-            logger.info(f"LLM decision: completed={result.get('completed', False)}")
-            return result
+        for attempt in range(1, self.retry_attempts + 1):
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    temperature=self.temperature,
+                    max_tokens=self.max_tokens,
+                    response_format={"type": "json_object"},
+                )
 
-        except Exception as e:
-            logger.error(f"LLM API error: {e}")
-            raise
+                content = response.choices[0].message.content
+                if not content:
+                    raise ValueError("LLM 返回空响应内容")
+
+                result = json.loads(content)
+                logger.info(
+                    "LLM decision: completed=%s (attempt %s/%s)",
+                    result.get("completed", False),
+                    attempt,
+                    self.retry_attempts,
+                )
+                return result
+
+            except Exception as error:
+                last_error = error
+                if attempt >= self.retry_attempts:
+                    break
+
+                sleep_seconds = self._compute_retry_delay(attempt)
+                logger.warning(
+                    "LLM 请求失败，准备重试 (%s/%s)，%.2f 秒后重试: %s",
+                    attempt,
+                    self.retry_attempts,
+                    sleep_seconds,
+                    error,
+                )
+                time.sleep(sleep_seconds)
+
+        logger.error("LLM API error after %s attempts: %s", self.retry_attempts, last_error)
+        raise last_error if last_error is not None else RuntimeError("LLM 调用失败")
+
+    def _compute_retry_delay(self, attempt: int) -> float:
+        """计算指数退避重试等待时间。"""
+        backoff = self.retry_base_delay * (2 ** (attempt - 1))
+        bounded_backoff = min(backoff, self.retry_max_delay)
+        jitter = random.uniform(0, min(0.5, bounded_backoff * 0.1))
+        return bounded_backoff + jitter
 
     def _build_system_prompt(self, intent: str, persona: Dict[str, Any]) -> str:
         """构建 system prompt

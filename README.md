@@ -31,17 +31,17 @@
 - [docs](docs)：设计文档
 - [scripts](scripts)：运行脚本
 - [src](src)：核心实现
-- [tools/fetch_tools](tools/fetch_tools)：tools 提取脚本
+- [tools/tool-inspector](tools/tool-inspector)：tools 提取脚本
 - [output](output)：运行输出
 
 关键文件：
 
 - [scripts/run_generation.py](scripts/run_generation.py)：主流程，负责生成、归档、转换、resume
-- [scripts/init_agents.py](scripts/init_agents.py)：初始化 worker agents
+- [scripts/init_agents.py](scripts/init_agents.py)：初始化 worker agents、配置 model/skills、生成初始 workspace 快照
 - [src/openclaw_wrapper.py](src/openclaw_wrapper.py)：OpenClaw CLI 与 session 管理
 - [src/llm_client.py](src/llm_client.py)：生成下一轮 query
 - [src/converter.py](src/converter.py)：session 转 middle format
-- [tools/fetch_tools/dump_tools.mjs](tools/fetch_tools/dump_tools.mjs)：提取完整 tools catalog
+- [tools/tool-inspector/dump_tools.mjs](tools/tool-inspector/dump_tools.mjs)：提取完整 tools catalog
 
 ## 环境要求
 
@@ -78,17 +78,27 @@ cp config/config.yaml.example config/config.yaml
 
 ```yaml
 openclaw:
-  base_agent: "main"
   worker_prefix: "gendata-worker"
   workspace_root: "~/.openclaw/workspaces"
   num_workers: 30
   thinking: "off"
+  api: "openai-completions"
+  worker_tools_allow:
+    - "read"
+    - "write"
+    - "edit"
+    - "apply_patch"
 
 llm:
   base_url: "http://your-llm-endpoint/v1"
   api_key: "your-api-key"
   model: "your-model"
   temperature: 0.7
+  max_tokens: 4000
+  timeout: 120
+  retry_attempts: 3
+  retry_base_delay: 1.0
+  retry_max_delay: 8.0
 
 generation:
   max_turns: 20
@@ -110,22 +120,56 @@ paths:
 - `openclaw.workspace_root`：worker 独立 workspace 根目录，每个 agent 会使用 `<workspace_root>/<agent_id>`
 - `openclaw.num_workers`：默认并发 worker 数
 - `openclaw.thinking`：OpenClaw thinking 级别
+- `openclaw.api`：写入 OpenClaw provider 配置时使用的 API 类型
+- `openclaw.worker_tools_allow`：worker agent 使用的工具 allowlist；未配置时使用代码默认值
+- `llm.max_tokens`：user loop 调用 LLM 生成 query 的最大输出 token 数
+- `llm.timeout`：user loop 调用 LLM 的请求超时
+- `llm.retry_attempts`：user loop 的 user model 最大尝试次数（包含首次请求）
+- `llm.retry_base_delay`：user model 重试的基础退避时间（秒）
+- `llm.retry_max_delay`：user model 重试等待的上限（秒）
 - `generation.max_turns`：保险轮次，避免死循环
 - `generation.timeout`：单次 OpenClaw 调用超时
 - `paths.tools_cache_file`：完整 tools catalog 缓存文件位置
+
+### OpenClaw 搜索配置（可选）
+
+如果使用 OpenClaw 内置 `web_search`，并且搜索 provider 选 `kimi`，需要在 `~/.openclaw/openclaw.json` 里配置，而不是在本项目的 [config/config.yaml](config/config.yaml) 里配置：
+
+```json
+{
+  "tools": {
+    "web": {
+      "search": {
+        "enabled": true,
+        "provider": "kimi",
+        "kimi": {
+          "apiKey": "your-kimi-key",
+          "baseUrl": "https://api.moonshot.cn/v1"
+        }
+      }
+    }
+  }
+}
+```
+
+说明：
+
+- OpenClaw 当前内置的 Kimi 搜索默认地址是 `https://api.moonshot.ai/v1`
+- 如果你的 key 只能走中国站，需要显式覆盖为 `https://api.moonshot.cn/v1`
+- `baseUrl` 这里需要保留 `/v1`
 
 ## 使用方式
 
 ### 1. 初始化 agents
 
-创建 agents 并配置工具（默认配置19个内置工具），默认生成工具列表：
+创建 agents 并配置工具，默认可同时生成工具列表：
 
 ```bash
 python scripts/init_agents.py --num-agents 60 --force-recreate --refresh-tools
 python scripts/init_agents.py --num-agents 30
 ```
 
-创建 agents + 生成工具列表：
+仅刷新所有 agents 的工具列表：
 
 ```bash
 python scripts/init_agents.py --num-agents 30 --refresh-tools
@@ -142,6 +186,13 @@ python scripts/init_agents.py --num-agents 30 --force-recreate
 ```bash
 python scripts/init_agents.py --refresh-agent gendata-worker-1
 ```
+
+初始化脚本还会额外做这些事情：
+
+- 为新创建的 agent workspace 修改 `AGENTS.md`，补充“只在自己 workspace 工作”的约束
+- 为新创建的 agent 保存初始 workspace 快照到 [output/workspace_snapshots](output/workspace_snapshots)
+- 后续每条 intent 开始前，worker 会先从快照恢复 workspace，避免上一次任务残留文件污染结果
+- 保存快照时会排除 `.git` 和 `BOOTSTRAP.md`
 
 ### 2. 正式运行
 
@@ -181,6 +232,7 @@ python scripts/run_generation.py --refresh-tools --limit 1
 6. 根据 progress 文件过滤已完成任务
 7. 每个 worker 绑定一个固定 agent，并发消费 intent 队列
 8. 对每条 intent：
+   - 从初始快照恢复当前 agent 的 workspace
    - reset 当前 agent 的 main session
    - 调用 LLM 生成下一条 query
    - 调用 OpenClaw 执行一轮交互
@@ -222,7 +274,7 @@ python scripts/run_generation.py --refresh-tools --limit 1
 默认行为：
 
 - 如果缓存存在，直接读取
-- 如果缓存不存在，自动调用 [tools/fetch_tools/dump_tools.mjs](tools/fetch_tools/dump_tools.mjs) 生成
+- 如果缓存不存在，自动调用 [tools/tool-inspector/dump_tools.mjs](tools/tool-inspector/dump_tools.mjs) 生成
 - 如果生成失败，则退回 session 元数据兜底
 
 ## 关于 tools 与 skills
@@ -235,7 +287,7 @@ python scripts/run_generation.py --refresh-tools --limit 1
 - description
 - parameters schema
 
-当前 [tools/fetch_tools/dump_tools.mjs](tools/fetch_tools/dump_tools.mjs) 已经改成动态发现当前 OpenClaw 工具，而不是仅依赖固定列表。
+当前 [tools/tool-inspector/dump_tools.mjs](tools/tool-inspector/dump_tools.mjs) 已经改成动态发现当前 OpenClaw 工具，而不是仅依赖固定列表。
 
 不过需要注意：少数工具本身是运行时动态拼 schema，静态提取可能仍然不完整，这时会退回兜底策略。
 
@@ -304,6 +356,15 @@ python scripts/run_generation.py --refresh-tools --limit 1
 ### 4. 为什么可以直接 resume
 
 因为 [output/progress.json](output/progress.json) 会记录已完成 intent；再次运行时会自动过滤成功项。
+
+### 5. 为什么 `web_search (kimi)` 明明配了 key 还是报错
+
+如果你用的是 Kimi / Moonshot 的中国站 key，除了配置 `tools.web.search.kimi.apiKey`，通常还需要把：
+
+- `tools.web.search.provider` 设成 `kimi`
+- `tools.web.search.kimi.baseUrl` 设成 `https://api.moonshot.cn/v1`
+
+否则 OpenClaw 会继续使用内置默认值 `https://api.moonshot.ai/v1`。
 
 ## 相关文档
 

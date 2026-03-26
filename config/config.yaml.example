@@ -1,6 +1,3 @@
-# OpenClaw 数据生成项目配置文件
-# 使用方法: cp config/config.yaml.example config/config.yaml
-# 然后修改 config.yaml 中的配置项
 
 # ============== OpenClaw 配置 ==============
 openclaw:
@@ -8,35 +5,45 @@ openclaw:
   workspace_root: "~/.openclaw/workspaces"
   num_workers: 3
   thinking: "off"
+  worker_tools_allow:
+    - "read"
+    - "write"
+    - "edit"
+    - "apply_patch"
+    - "exec"
+    - "process"
+    - "web_search"
+    - "web_fetch"
+    - "memory_search"
+    - "memory_get"
+    - "sessions_list"
+    - "sessions_history"
+    - "sessions_send"
+    - "sessions_spawn"
+    - "session_status"
+    - "subagents"
+    - "agents_list"
+    - "image"
+    - "tts"
   model_url: "xxx"
   model_api_key: "xxx"
   model: "claude-sonnet-4-6"
-  api: "openai-completions"
-  context_window: 200000 
-  max_tokens: 8192 
+  api: "openai-completions"     # openai-completions / anthropic-messages
+  context_window: 360000 
+  max_tokens: 36000
 
 
 # ============== LLM API 配置 ==============
 llm:
-  # LLM API 基础URL
-  # 示例: Azure OpenAI: "https://your-resource.openai.azure.com"
-  # 示例: DeepSeek: "https://api.deepseek.com"
-  base_url: "${LLM_BASE_URL}"
-  
-  # API Key（建议使用环境变量）
-  api_key: "${LLM_API_KEY}"
-  
-  # 模型名称
+  base_url: "xxx"
+  api_key: "xxx"
   model: "gpt-4o-2024-11-20"
-  
-  # 温度参数（控制随机性，0-2）
   temperature: 0.7
-  
-  # 最大生成 token 数
-  max_tokens: 4000
-  
-  # 请求超时时间（秒）
+  max_tokens: 36000
   timeout: 120
+  retry_attempts: 3
+  retry_base_delay: 1.0
+  retry_max_delay: 8.0
 
 # ============== 生成配置 ==============
 generation:
@@ -48,23 +55,12 @@ generation:
 
 # ============== 路径配置 ==============
 paths:
-  # Intent 数据文件路径
-  intents_file: "data_examples/intents.jsonl"
-  
-  # 输出根目录
-  output_dir: "output"
-  
-  # 归档后的 session jsonl 输出目录
-  sessions_dir: "output/sessions"
-  
-  # 中间格式输出目录
-  middle_format_dir: "output/middle_format"
-  
-  # 进度文件
-  progress_file: "output/progress.json"
-  
-  # 日志目录
-  logs_dir: "output/logs"
+  intents_file: "data_examples/intents.jsonl"   # Intent 数据文件路径
+  output_dir: "output"                          # 输出根目录
+  sessions_dir: "output/sessions"               # 归档后的 session jsonl 输出目录
+  middle_format_dir: "output/middle_format"     # 中间格式输出目录
+  progress_file: "output/progress.json"         # 进度文件
+  logs_dir: "output/logs"                       # 日志目录
   
   # 工具 catalog 缓存文件；按 agent 分组存储 {agent_id: [tools]}
   # 使用 init_agents.py --refresh-tools 生成

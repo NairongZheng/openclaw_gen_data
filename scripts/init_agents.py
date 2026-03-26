@@ -24,6 +24,33 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+SNAPSHOT_EXCLUDE_NAMES = {".git", "BOOTSTRAP.md"}
+
+
+def resolve_project_root() -> Path:
+    """解析项目根目录。"""
+    if '__file__' in globals():
+        return Path(__file__).parent.parent
+    return Path(os.getcwd())
+
+
+def resolve_init_settings(
+    cli_num_agents: Optional[int],
+    cli_worker_prefix: Optional[str],
+    cli_workspace_root: Optional[str],
+    config: Dict[str, Any],
+) -> Dict[str, Any]:
+    """合并 CLI 参数和配置文件，得到 init_agents 的有效设置。"""
+    openclaw_config = config.get("openclaw", {})
+    paths_config = config.get("paths", {})
+    return {
+        "num_agents": cli_num_agents or openclaw_config.get("num_workers", 3),
+        "worker_prefix": cli_worker_prefix or openclaw_config.get("worker_prefix", "gendata-worker"),
+        "workspace_root": cli_workspace_root or openclaw_config.get("workspace_root"),
+        "tools_output_file": paths_config.get("tools_cache_file", "output/tools/tools_all_agents.json"),
+    }
+
+
 # ============== 工具生成相关函数 ==============
 
 def convert_to_openai_format(tools: List[Dict]) -> List[Dict[str, Any]]:
@@ -115,6 +142,7 @@ def generate_all_agents_tools(
         按 agent 分组的工具字典: {agent_id: [tools...]}
     """
     tools_by_agent = {}
+    failed_agents: List[str] = []
 
     for agent_id in agent_ids:
         try:
@@ -124,6 +152,15 @@ def generate_all_agents_tools(
             logger.error(f"生成 agent {agent_id} 的工具列表失败: {e}")
             # 失败时记录空列表，允许后续使用 session 元数据兜底
             tools_by_agent[agent_id] = []
+            failed_agents.append(agent_id)
+
+    if failed_agents:
+        logger.warning(
+            "工具列表生成失败的 agents: %s",
+            ", ".join(failed_agents),
+        )
+        if len(failed_agents) == len(agent_ids):
+            raise RuntimeError("所有 agent 的工具列表生成都失败了，请先修复 tool-inspector 依赖或运行环境")
 
     # 保存到文件
     output_path = Path(output_file)
@@ -228,7 +265,7 @@ def save_workspace_snapshot(agent_id: str, workspace_root: str, snapshot_dir: st
     # 复制 workspace 到快照目录（排除 .git）
     snapshot_path.mkdir(parents=True, exist_ok=True)
     for item in workspace.iterdir():
-        if item.name == '.git':
+        if item.name in SNAPSHOT_EXCLUDE_NAMES:
             continue
         dest = snapshot_path / item.name
         if item.is_dir():
@@ -239,18 +276,41 @@ def save_workspace_snapshot(agent_id: str, workspace_root: str, snapshot_dir: st
     logger.info(f"已保存 agent {agent_id} 的 workspace 快照到 {snapshot_path}")
 
 
+def remove_excluded_workspace_files(agent_id: str, workspace_root: str) -> None:
+    """删除 workspace 中不希望保留的文件。"""
+    from src.openclaw_wrapper import expected_agent_workspace
+
+    workspace = expected_agent_workspace(agent_id, workspace_root)
+    removed_names: List[str] = []
+
+    for name in SNAPSHOT_EXCLUDE_NAMES - {".git"}:
+        target = workspace / name
+        if not target.exists():
+            continue
+
+        if target.is_dir():
+            shutil.rmtree(target)
+        else:
+            target.unlink()
+        removed_names.append(name)
+
+    if removed_names:
+        logger.info("已删除 agent %s workspace 中的文件: %s", agent_id, ", ".join(sorted(removed_names)))
+
+
 # ============== Agent 初始化函数 ==============
 
 def init_agents(
     num_agents: int = 30,
     worker_prefix: str = "gendata-worker",
-    workspace_root: str = None,
+    workspace_root: Optional[str] = None,
     force_recreate: bool = False,
     refresh_tools: bool = True,
     refresh_agents: Optional[List[str]] = None,
-    project_root: Path = None,
-    tools_output_file: str = None,
+    project_root: Optional[Path] = None,
+    tools_output_file: Optional[str] = None,
     add_tools: bool = True,
+    config: Optional[Dict[str, Any]] = None,
 ) -> bool:
     """初始化多个 OpenClaw agent，可选生成工具列表。
 
@@ -264,16 +324,22 @@ def init_agents(
         project_root: 项目根目录
         tools_output_file: 工具输出文件路径
         add_tools: 是否自动配置工具白名单（默认 True）
+        config: 已加载的配置字典（可选）
 
     Returns:
         是否成功
     """
     logger.info(f"开始检查并创建 {num_agents} 个 agents...")
+    project_root = project_root or resolve_project_root()
     root_dir = resolve_workspace_root(workspace_root)
     logger.info("worker workspaces 根目录: %s", root_dir)
+    config = config or load_config()
+    openclaw_config = config.get("openclaw", {})
+    paths_config = config.get("paths", {})
+    worker_tools_allow = openclaw_config.get("worker_tools_allow")
 
     # 如果强制重建，先删除旧的 workspace 快照
-    if force_recreate and project_root:
+    if force_recreate:
         snapshot_dir = project_root / "output" / "workspace_snapshots"
         if snapshot_dir.exists():
             logger.info("删除旧的 workspace 快照...")
@@ -286,6 +352,7 @@ def init_agents(
         workspace_root=str(root_dir),
         force_recreate=force_recreate,
         add_tools=add_tools,
+        tools_allow=worker_tools_allow,
     )
     logger.info(
         "已存在: %s，新建: %s，已删除: %s",
@@ -306,92 +373,85 @@ def init_agents(
         logger.info(f"修改 {len(new_agent_ids)} 个新 agents 的 AGENTS.md...")
         for agent_id in new_agent_ids:
             modify_agent_md(agent_id, str(root_dir))
+            remove_excluded_workspace_files(agent_id, str(root_dir))
 
-        if not project_root:
-            logger.warning("未指定 project_root，跳过 workspace 快照保存")
-        else:
-            snapshot_dir = project_root / "output" / "workspace_snapshots"
-            snapshot_dir.mkdir(parents=True, exist_ok=True)
-            logger.info(f"保存 {len(new_agent_ids)} 个新 agents 的 workspace 快照...")
-            for agent_id in new_agent_ids:
-                save_workspace_snapshot(agent_id, str(root_dir), str(snapshot_dir))
-            logger.info(f"✓ 已保存新 agents 的 workspace 快照到 {snapshot_dir}")
+        snapshot_dir = project_root / "output" / "workspace_snapshots"
+        snapshot_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"保存 {len(new_agent_ids)} 个新 agents 的 workspace 快照...")
+        for agent_id in new_agent_ids:
+            save_workspace_snapshot(agent_id, str(root_dir), str(snapshot_dir))
+        logger.info(f"✓ 已保存新 agents 的 workspace 快照到 {snapshot_dir}")
     else:
         logger.info("无新建 agents，跳过 AGENTS.md 修改和快照保存")
 
     # 配置全局 skills 设置和 provider
-    if project_root:
-        from src.openclaw_wrapper import configure_global_skills, configure_global_provider
+    from src.openclaw_wrapper import configure_global_skills, configure_global_provider
 
-        config = load_config()
-        skills_dir_rel = config["paths"].get("skills_dir", "tools/skills/skills_collections")
-        skills_dir = project_root / skills_dir_rel
-        logger.info("配置全局 skills 设置...")
-        configure_global_skills(
-            extra_dirs=[str(skills_dir)],
-            allow_bundled=[]  # 禁用所有内置 skills
+    skills_dir_rel = paths_config.get("skills_dir", "tools/skills/skills_collections")
+    skills_dir = project_root / skills_dir_rel
+    logger.info("配置全局 skills 设置...")
+    configure_global_skills(
+        extra_dirs=[str(skills_dir)],
+        allow_bundled=[]  # 禁用所有内置 skills
+    )
+    logger.info("✓ 已配置全局 skills 设置")
+
+    # 配置全局 provider
+    model_url = openclaw_config.get("model_url")
+    model_api_key = openclaw_config.get("model_api_key")
+    model = openclaw_config.get("model")
+    provider_api = openclaw_config.get("api", "anthropic-messages")
+    context_window = openclaw_config.get("context_window", 200000)
+    max_tokens = openclaw_config.get("max_tokens", 200000)
+
+    if model_url and model_api_key and model:
+        logger.info("配置全局 provider...")
+        configure_global_provider(
+            provider_name="trajectory_provider",
+            base_url=model_url,
+            api_key=model_api_key,
+            model_id=model,
+            provider_api=provider_api,
+            context_window=context_window,
+            max_tokens=max_tokens
         )
-        logger.info("✓ 已配置全局 skills 设置")
-
-        # 配置全局 provider
-        config = load_config()
-        openclaw_config = config.get("openclaw", {})
-        model_url = openclaw_config.get("model_url")
-        model_api_key = openclaw_config.get("model_api_key")
-        model = openclaw_config.get("model")
-        context_window = openclaw_config.get("context_window", 200000)
-        max_tokens = openclaw_config.get("max_tokens", 200000)
-
-        if model_url and model_api_key and model:
-            logger.info("配置全局 provider...")
-            configure_global_provider(
-                provider_name="trajectory_provider",
-                base_url=model_url,
-                api_key=model_api_key,
-                model_id=model,
-                context_window=context_window,
-                max_tokens=max_tokens
-            )
-            logger.info("✓ 已配置全局 provider")
+        logger.info("✓ 已配置全局 provider")
 
     # 配置所有 agents 的 model 和 skills
     all_agent_ids = [f"{worker_prefix}-{i+1}" for i in range(num_agents)]
-    if project_root:
-        config = load_config()
-        openclaw_config = config.get("openclaw", {})
-        model_url = openclaw_config.get("model_url")
-        model_api_key = openclaw_config.get("model_api_key")
-        model = openclaw_config.get("model")
+    model_url = openclaw_config.get("model_url")
+    model_api_key = openclaw_config.get("model_api_key")
+    model = openclaw_config.get("model")
 
-        if model_url and model_api_key and model:
-            logger.info(f"配置 {len(all_agent_ids)} 个 agents 的 model 和 skills...")
-            from src.openclaw_wrapper import configure_agent
+    if model_url and model_api_key and model:
+        logger.info(f"配置 {len(all_agent_ids)} 个 agents 的 model 和 skills...")
+        from src.openclaw_wrapper import configure_agent
 
-            # 从配置读取 skills 目录
-            skills_dir_rel = config["paths"].get("skills_dir", "tools/skills/skills_collections")
-            skills_dir = project_root / skills_dir_rel
-            agent_skills = []
-            if skills_dir.exists():
-                agent_skills = [d.name for d in skills_dir.iterdir() if d.is_dir()]
-                logger.info(f"从 {skills_dir} 读取到 {len(agent_skills)} 个 skills")
+        # 从配置读取 skills 目录
+        skills_dir_rel = paths_config.get("skills_dir", "tools/skills/skills_collections")
+        skills_dir = project_root / skills_dir_rel
+        agent_skills = []
+        if skills_dir.exists():
+            agent_skills = [d.name for d in skills_dir.iterdir() if d.is_dir()]
+            logger.info(f"从 {skills_dir} 读取到 {len(agent_skills)} 个 skills")
 
-            # model 格式：provider_name/model_name
-            model_config = f"trajectory_provider/{model}"
+        # model 格式：provider_name/model_name
+        model_config = f"trajectory_provider/{model}"
 
-            for agent_id in all_agent_ids:
-                configure_agent(
-                    agent_id=agent_id,
-                    model=model_config,
-                    skills=agent_skills
-                )
-            logger.info(f"✓ 已配置所有 agents 的 model 和 {len(agent_skills)} 个 skills")
-        else:
-            logger.warning("配置文件中缺少 model_url/model_api_key/model，跳过配置")
+        for agent_id in all_agent_ids:
+            configure_agent(
+                agent_id=agent_id,
+                model=model_config,
+                skills=agent_skills
+            )
+        logger.info(f"✓ 已配置所有 agents 的 model 和 {len(agent_skills)} 个 skills")
+    else:
+        logger.warning("配置文件中缺少 model_url/model_api_key/model，跳过配置")
 
     # 新增：生成工具列表
     if refresh_tools or refresh_agents:
-        if not project_root or not tools_output_file:
-            logger.warning("未指定 project_root 或 tools_output_file，跳过工具生成")
+        if not tools_output_file:
+            logger.warning("未指定 tools_output_file，跳过工具生成")
             return True
 
         if refresh_agents:
@@ -418,20 +478,19 @@ def init_agents(
 def main():
     """主函数"""
     parser = argparse.ArgumentParser(description="初始化 OpenClaw agents")
+    parser.add_argument("--config", default="config/config.yaml", help="配置文件路径")
     parser.add_argument(
         "--num-agents",
         type=int,
-        default=3,
-        help="要创建的 agent 数量（默认: 3）"
+        help="要创建的 agent 数量（默认读取 openclaw.num_workers）"
     )
     parser.add_argument(
         "--worker-prefix",
-        default="gendata-worker",
-        help="worker agent 前缀（默认: gendata-worker）",
+        help="worker agent 前缀（默认读取 openclaw.worker_prefix）",
     )
     parser.add_argument(
         "--workspace-root",
-        help="隔离 workspace 根目录，默认使用 ~/.openclaw/workspaces",
+        help="隔离 workspace 根目录，默认读取 openclaw.workspace_root",
     )
     parser.add_argument(
         "--force-recreate",
@@ -459,33 +518,31 @@ def main():
     args = parser.parse_args()
 
     # 读取配置获取输出路径
-    config = load_config()
-    # 防御性处理 __file__ (容器环境兼容)
-
-    if '__file__' in globals():
-
-        project_root = Path(__file__).parent.parent
-
-    else:
-
-        project_root = Path(os.getcwd())
-    tools_output = config["paths"].get("tools_cache_file", "output/tools/tools_all_agents.json")
-
-    success = init_agents(
+    config = load_config(args.config)
+    settings = resolve_init_settings(
         args.num_agents,
         args.worker_prefix,
         args.workspace_root,
+        config,
+    )
+    project_root = resolve_project_root()
+
+    success = init_agents(
+        settings["num_agents"],
+        settings["worker_prefix"],
+        settings["workspace_root"],
         args.force_recreate,
         refresh_tools=args.refresh_tools,
         refresh_agents=args.refresh_agent,
         project_root=project_root,
-        tools_output_file=tools_output,
-        add_tools=args.add_tools
+        tools_output_file=settings["tools_output_file"],
+        add_tools=args.add_tools,
+        config=config,
     )
     if success:
         logger.info("✓ 所有 agent 初始化成功")
         if args.refresh_tools or args.refresh_agent:
-            logger.info(f"✓ 工具列表已保存到 {tools_output}")
+            logger.info(f"✓ 工具列表已保存到 {settings['tools_output_file']}")
     else:
         logger.error("✗ Agent 初始化失败")
         exit(1)

@@ -47,14 +47,17 @@ class DataConverter:
             logger.error(f"Failed to parse session file: {e}")
             raise
 
+        openai_messages = self._extract_messages_openai_format(messages)
+        enable_thinking = any(msg.get("reasoning_content") for msg in openai_messages)
+
         # 构建符合规范的 middle format
         middle_format = {
             "status": "completed",
             "session_id": Path(session_file).stem,
             "intent": intent_data.get("natural_language_intent"),
             "total_steps": self._count_tool_calls(messages),
-            "enable_thinking": True,
-            "messages": self._extract_messages_openai_format(messages),
+            "enable_thinking": enable_thinking,
+            "messages": openai_messages,
             "tools": self._extract_tools(messages, tools_catalog, available_tool_entries),
             "skills": skills or [],
             "final_output": self._extract_final_output(messages),
@@ -138,10 +141,13 @@ class DataConverter:
 
     def _extract_reasoning(self, content: List[Dict]) -> str:
         """提取 reasoning 内容"""
+        reasoning_parts: List[str] = []
         for item in content:
             if item.get("type") == "thinking":
-                return item.get("text", "")
-        return ""
+                reasoning_text = item.get("thinking") or item.get("text") or ""
+                if reasoning_text:
+                    reasoning_parts.append(reasoning_text)
+        return "\n\n".join(reasoning_parts).strip()
 
     def _extract_tools(
         self,
