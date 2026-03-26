@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 SNAPSHOT_EXCLUDE_NAMES = {".git", "BOOTSTRAP.md"}
+SHARED_WORKSPACE_SNAPSHOT_NAME = "_template"
 
 
 def resolve_project_root() -> Path:
@@ -276,6 +277,32 @@ def save_workspace_snapshot(agent_id: str, workspace_root: str, snapshot_dir: st
     logger.info(f"已保存 agent {agent_id} 的 workspace 快照到 {snapshot_path}")
 
 
+def save_shared_workspace_snapshot(agent_id: str, workspace_root: str, snapshot_dir: str) -> None:
+    """保存共享 workspace 模板快照。
+
+    所有新创建的 worker 初始内容一致时，只保留一份模板快照即可。
+    """
+    from src.openclaw_wrapper import expected_agent_workspace
+
+    workspace = expected_agent_workspace(agent_id, workspace_root)
+    snapshot_path = Path(snapshot_dir) / SHARED_WORKSPACE_SNAPSHOT_NAME
+
+    if snapshot_path.exists():
+        shutil.rmtree(snapshot_path)
+
+    snapshot_path.mkdir(parents=True, exist_ok=True)
+    for item in workspace.iterdir():
+        if item.name in SNAPSHOT_EXCLUDE_NAMES:
+            continue
+        dest = snapshot_path / item.name
+        if item.is_dir():
+            shutil.copytree(item, dest, symlinks=False)
+        else:
+            shutil.copy2(item, dest)
+
+    logger.info("已保存共享 workspace 模板快照到 %s", snapshot_path)
+
+
 def remove_excluded_workspace_files(agent_id: str, workspace_root: str) -> None:
     """删除 workspace 中不希望保留的文件。"""
     from src.openclaw_wrapper import expected_agent_workspace
@@ -377,10 +404,14 @@ def init_agents(
 
         snapshot_dir = project_root / "output" / "workspace_snapshots"
         snapshot_dir.mkdir(parents=True, exist_ok=True)
-        logger.info(f"保存 {len(new_agent_ids)} 个新 agents 的 workspace 快照...")
-        for agent_id in new_agent_ids:
-            save_workspace_snapshot(agent_id, str(root_dir), str(snapshot_dir))
-        logger.info(f"✓ 已保存新 agents 的 workspace 快照到 {snapshot_dir}")
+
+        template_agent_id = new_agent_ids[0]
+        logger.info(
+            "新 agents 初始内容一致，使用 %s 保存一份共享 workspace 模板快照...",
+            template_agent_id,
+        )
+        save_shared_workspace_snapshot(template_agent_id, str(root_dir), str(snapshot_dir))
+        logger.info("✓ 已保存共享 workspace 模板快照到 %s", snapshot_dir)
     else:
         logger.info("无新建 agents，跳过 AGENTS.md 修改和快照保存")
 

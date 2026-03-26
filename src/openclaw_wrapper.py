@@ -82,9 +82,34 @@ def resolve_workspace_root(workspace_root: Optional[str] = None) -> Path:
     return Path(workspace_root).expanduser() if workspace_root else Path.home() / ".openclaw" / "workspaces"
 
 
+def resolve_openclaw_state_dir(config_path: Optional[Path] = None) -> Path:
+    """解析 OpenClaw 状态目录。"""
+    return get_openclaw_config_path(config_path).parent
+
+
 def expected_agent_workspace(agent_id: str, workspace_root: Optional[str] = None) -> Path:
     """获取指定 agent 的预期隔离 workspace 路径。"""
     return resolve_workspace_root(workspace_root) / agent_id
+
+
+def expected_agent_state_dir(agent_id: str, config_path: Optional[Path] = None) -> Path:
+    """获取指定 agent 的状态目录。"""
+    return resolve_openclaw_state_dir(config_path) / "agents" / agent_id
+
+
+def ensure_agent_state_dirs(agent_id: str, config_path: Optional[Path] = None) -> Path:
+    """确保 agent 的状态目录存在。"""
+    state_dir = expected_agent_state_dir(agent_id, config_path)
+    (state_dir / "sessions").mkdir(parents=True, exist_ok=True)
+    (state_dir / "agent").mkdir(parents=True, exist_ok=True)
+    return state_dir
+
+
+def clone_workspace_template(template_workspace: Path, target_workspace: Path) -> None:
+    """从模板 workspace 克隆到目标目录。"""
+    if target_workspace.exists():
+        shutil.rmtree(target_workspace)
+    shutil.copytree(template_workspace, target_workspace)
 
 
 def configure_agent(
@@ -124,6 +149,10 @@ def configure_agent(
     if agent_config is None:
         agent_config = {"id": agent_id}
         agent_list.append(agent_config)
+
+    agent_state_dir = ensure_agent_state_dirs(agent_id, config_path)
+    agent_config.setdefault("name", agent_id)
+    agent_config.setdefault("agentDir", str(agent_state_dir / "agent"))
 
     # 4. 配置 workspace
     if workspace is not None:
@@ -251,7 +280,11 @@ def configure_global_provider(
     logger.info(f"已配置全局 provider: {provider_name}")
 
 
-def delete_worker_agents(worker_prefix: str = "gendata-worker") -> List[str]:
+def delete_worker_agents(
+    worker_prefix: str = "gendata-worker",
+    workspace_root: Optional[str] = None,
+    config_path: Optional[Path] = None,
+) -> List[str]:
     """删除所有指定前缀的 worker agents。
 
     Args:
@@ -260,24 +293,57 @@ def delete_worker_agents(worker_prefix: str = "gendata-worker") -> List[str]:
     Returns:
         已删除的 agent ID 列表
     """
-    existing_agents = list_agents()
+    # 旧逻辑（保留作参考，不再实际调用，避免大量 openclaw delete 太慢）:
+    # existing_agents = list_agents()
+    # worker_agents = [
+    #     agent["id"] for agent in existing_agents
+    #     if agent["id"].startswith(worker_prefix)
+    # ]
+    #
+    # deleted = []
+    # for agent_id in worker_agents:
+    #     logger.info(f"删除 agent: {agent_id}")
+    #     result = subprocess.run(
+    #         ["openclaw", "agents", "delete", agent_id, "--force", "--json"],
+    #         capture_output=True,
+    #         text=True,
+    #     )
+    #     if result.returncode != 0:
+    #         logger.error(f"删除 agent {agent_id} 失败: {result.stderr}")
+    #         continue
+    #     deleted.append(agent_id)
+    # return deleted
+
+    config = load_openclaw_config(config_path, default={"agents": {"list": []}})
+    agent_list = config.setdefault("agents", {}).setdefault("list", [])
     worker_agents = [
-        agent["id"] for agent in existing_agents
-        if agent["id"].startswith(worker_prefix)
+        agent for agent in agent_list
+        if agent.get("id", "").startswith(worker_prefix)
     ]
 
-    deleted = []
-    for agent_id in worker_agents:
-        logger.info(f"删除 agent: {agent_id}")
-        result = subprocess.run(
-            ["openclaw", "agents", "delete", agent_id, "--force", "--json"],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            logger.error(f"删除 agent {agent_id} 失败: {result.stderr}")
+    deleted: List[str] = []
+    root_dir = resolve_workspace_root(workspace_root)
+    for agent in worker_agents:
+        agent_id = agent.get("id")
+        if not agent_id:
             continue
+        logger.info("删除 agent: %s", agent_id)
         deleted.append(agent_id)
+
+        workspace = expected_agent_workspace(agent_id, str(root_dir))
+        if workspace.exists():
+            shutil.rmtree(workspace)
+
+        state_dir = expected_agent_state_dir(agent_id, config_path)
+        if state_dir.exists():
+            shutil.rmtree(state_dir)
+
+    if deleted:
+        config["agents"]["list"] = [
+            agent for agent in agent_list
+            if agent.get("id") not in set(deleted)
+        ]
+        save_openclaw_config(config, config_path)
 
     return deleted
 
@@ -311,7 +377,7 @@ def ensure_agents(
     # 强制重置：删除所有 worker agents
     if force_recreate:
         logger.info(f"强制删除所有 {worker_prefix} agents...")
-        deleted = delete_worker_agents(worker_prefix)
+        deleted = delete_worker_agents(worker_prefix, str(root_dir))
         if deleted:
             logger.info(f"已删除 {len(deleted)} 个 agents: {', '.join(deleted)}")
 
@@ -320,29 +386,51 @@ def ensure_agents(
 
     created: List[str] = []
     existing: List[str] = []
+    missing_agent_ids: List[str] = []
 
-    # 创建所需数量的 agents（简化逻辑，不检查 workspace）
     for index in range(1, num_agents + 1):
         agent_id = f"{worker_prefix}-{index}"
-        desired_workspace = expected_agent_workspace(agent_id, str(root_dir))
-        desired_workspace.mkdir(parents=True, exist_ok=True)
-
-        # 如果 agent 已存在，跳过创建
         if agent_id in existing_agents:
             existing.append(agent_id)
             continue
+        missing_agent_ids.append(agent_id)
 
-        # 创建新 agent
+    template_workspace: Optional[Path] = None
+    if missing_agent_ids:
+        template_agent_id = missing_agent_ids[0]
+        template_workspace = expected_agent_workspace(template_agent_id, str(root_dir))
+        template_workspace.mkdir(parents=True, exist_ok=True)
+
+        # 旧逻辑（保留作参考，不再对每个 agent 调 openclaw add）:
+        # for agent_id in missing_agent_ids:
+        #     desired_workspace = expected_agent_workspace(agent_id, str(root_dir))
+        #     desired_workspace.mkdir(parents=True, exist_ok=True)
+        #     cmd = [
+        #         "openclaw", "agents", "add", agent_id,
+        #         "--non-interactive",
+        #         "--workspace", str(desired_workspace),
+        #         "--json",
+        #     ]
+        #     result = subprocess.run(cmd, capture_output=True, text=True)
+        #     if result.returncode != 0:
+        #         raise RuntimeError(f"Failed to create agent {agent_id}: {result.stderr}")
+        #     created.append(agent_id)
+
         cmd = [
-            "openclaw", "agents", "add", agent_id,
+            "openclaw", "agents", "add", template_agent_id,
             "--non-interactive",
-            "--workspace", str(desired_workspace),
+            "--workspace", str(template_workspace),
             "--json",
         ]
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
-            raise RuntimeError(f"Failed to create agent {agent_id}: {result.stderr}")
-        created.append(agent_id)
+            raise RuntimeError(f"Failed to create agent {template_agent_id}: {result.stderr}")
+        created.append(template_agent_id)
+
+        for agent_id in missing_agent_ids[1:]:
+            desired_workspace = expected_agent_workspace(agent_id, str(root_dir))
+            clone_workspace_template(template_workspace, desired_workspace)
+            created.append(agent_id)
 
     # 配置 workspace 和工具
     if add_tools:

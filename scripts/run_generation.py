@@ -27,6 +27,8 @@ from src.utils import ensure_dir, load_json, save_json, setup_logging
 
 logger = logging.getLogger(__name__)
 
+SHARED_WORKSPACE_SNAPSHOT_NAME = "_template"
+
 # 全局变量用于优雅退出
 _shutdown_requested = threading.Event()
 _active_agents: List[str] = []
@@ -239,7 +241,10 @@ def restore_workspace_snapshot(agent_name: str, config: Dict[str, Any]) -> None:
     workspace_root = config["openclaw"].get("workspace_root")
     root_dir = resolve_workspace_root(workspace_root)
     workspace = expected_agent_workspace(agent_name, str(root_dir))
-    snapshot_path = get_workspace_snapshot_dir() / agent_name
+    snapshot_root = get_workspace_snapshot_dir()
+    shared_snapshot_path = snapshot_root / SHARED_WORKSPACE_SNAPSHOT_NAME
+    agent_snapshot_path = snapshot_root / agent_name
+    snapshot_path = shared_snapshot_path if shared_snapshot_path.exists() else agent_snapshot_path
 
     if not snapshot_path.exists():
         logger.warning(f"Agent {agent_name} 的快照不存在，跳过恢复: {snapshot_path}")
@@ -271,7 +276,7 @@ def restore_workspace_snapshot(agent_name: str, config: Dict[str, Any]) -> None:
         except Exception as e:
             logger.warning(f"恢复 {item} 失败: {e}")
 
-    logger.info(f"已从快照恢复 agent {agent_name} 的 workspace")
+    logger.info("已从快照 %s 恢复 agent %s 的 workspace", snapshot_path.name, agent_name)
 
 
 def process_intent(
