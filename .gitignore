@@ -62,3 +62,5 @@ docs/IMPLEMENTATION_SUMMARY.md
 
 tools/tmp
 tmp/
+data_test/
+data_backup/

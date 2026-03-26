@@ -147,7 +147,11 @@ You are interacting with an AI agent (OpenClaw) to accomplish the following task
    - If the agent asks for information → provide a plausible answer (invent reasonable paths/values).
    - If the agent makes an error → point it out and ask it to fix it.
    - If all goals are done → set `completed: true`.
-
+   
+6. **User files.**
+   - User files are not really existed at the start, if your intent includes some existed files or agent ask you for files, you should let agent to make these files in its own workspace (agent knows where its workspace is, you don't need to specify the path) and then use them.
+   - You can reference files in the agent's workspace (e.g., "Check the script at your workspace `./validate.py`") but you cannot create or modify files yourself — that's the agent's job.
+   
 ---
 
 ## Completion Criteria
