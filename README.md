@@ -162,23 +162,12 @@ paths:
 
 ### 1. 初始化 agents
 
-创建 agents 并配置工具，默认可同时生成工具列表：
+创建 agents 并配置工具：
 
 ```bash
 python scripts/init_agents.py --num-agents 60 --force-recreate --refresh-tools
-python scripts/init_agents.py --num-agents 30
-```
-
-仅刷新所有 agents 的工具列表：
-
-```bash
-python scripts/init_agents.py --num-agents 30 --refresh-tools
-```
-
-强制删除并重建所有 worker agents：
-
-```bash
-python scripts/init_agents.py --num-agents 30 --force-recreate
+    # --force-recreate：强制删除并重建所有 worker agents
+    # --refresh-tools：刷新所有 agents 的工具列表
 ```
 
 刷新单个 agent 的工具列表：
@@ -196,16 +185,9 @@ python scripts/init_agents.py --refresh-agent gendata-worker-1
 
 ### 2. 正式运行
 
-按配置中的默认并发运行：
-
-```bash
-python scripts/run_generation.py
-```
-
-指定并发数：
-
 ```bash
 python scripts/run_generation.py --concurrent 30
+    # --concurrent：指定并发数
 ```
 
 只跑前 10 条 intent：
