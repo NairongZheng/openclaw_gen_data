@@ -65,6 +65,32 @@ def _extract_json_payload(raw_text: str) -> Any:
     raise json.JSONDecodeError("No JSON payload found in OpenClaw output", raw_text, 0)
 
 
+def _extract_openclaw_response(stdout_text: str, stderr_text: str) -> Any:
+    """从 OpenClaw CLI 输出中提取 JSON 响应。
+
+    新版/异常路径下，OpenClaw 可能把日志与最终 JSON 一起写到 stderr，
+    stdout 为空；因此这里按 stdout -> stderr -> 合并文本 依次尝试。
+    """
+    parse_errors: List[str] = []
+    for source_name, raw_text in (
+        ("stdout", stdout_text),
+        ("stderr", stderr_text),
+        ("combined", "\n".join(part for part in (stdout_text, stderr_text) if part)),
+    ):
+        if not raw_text:
+            continue
+        try:
+            return _extract_json_payload(raw_text)
+        except json.JSONDecodeError as exc:
+            parse_errors.append(f"{source_name}: {exc}")
+
+    raise json.JSONDecodeError(
+        "Unable to extract OpenClaw JSON response",
+        f"stdout={stdout_text!r}; stderr={stderr_text!r}; errors={'; '.join(parse_errors)}",
+        0,
+    )
+
+
 def list_agents() -> List[Dict[str, Any]]:
     """列出当前已存在的 OpenClaw agents。"""
     result = subprocess.run(
@@ -541,7 +567,7 @@ class OpenClawWrapper:
                 logger.error(f"OpenClaw command failed: {result.stderr}")
                 raise RuntimeError(f"OpenClaw error: {result.stderr}")
 
-            return _extract_json_payload(result.stdout)
+            return _extract_openclaw_response(result.stdout, result.stderr)
 
         except subprocess.TimeoutExpired:
             logger.error(f"OpenClaw command timeout after {timeout}s")
@@ -554,7 +580,11 @@ class OpenClawWrapper:
     def extract_assistant_text(response: Dict[str, Any]) -> str:
         """从 CLI JSON 响应中提取 assistant 文本。"""
         texts: List[str] = []
-        for payload in response.get("result", {}).get("payloads", []):
+        payloads = response.get("result", {}).get("payloads")
+        if payloads is None:
+            payloads = response.get("payloads", [])
+
+        for payload in payloads:
             if not isinstance(payload, dict):
                 continue
             text = payload.get("text")
