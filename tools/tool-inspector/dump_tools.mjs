@@ -20,6 +20,7 @@
 import fs from 'fs';
 import path from 'path';
 import { createRequire } from 'module';
+import { execFileSync } from 'child_process';
 import { parseArgs } from 'util';
 
 const req = createRequire(import.meta.url);
@@ -82,23 +83,139 @@ if (args['all-agents']) {
 
 // ── 自动探测 OpenClaw 安装路径 ────────────────────────────────────────────────
 
-function findOpenClawRoot() {
-  const candidates = [
-    '/opt/homebrew/lib/node_modules/openclaw',
-    '/usr/local/lib/node_modules/openclaw',
-    path.join(HOME, '.nvm/versions/node/current/lib/node_modules/openclaw'),
-  ];
-  try {
-    const url = import.meta.resolve?.('openclaw/package.json');
-    if (url) candidates.unshift(path.dirname(new URL(url).pathname));
-  } catch {}
-  return candidates.find(p => fs.existsSync(p));
+function pathExecutableCandidates(binaryName) {
+  const pathEnv = process.env.PATH ?? '';
+  const exts = process.platform === 'win32'
+    ? (process.env.PATHEXT ?? '.EXE;.CMD;.BAT').split(';')
+    : [''];
+
+  return pathEnv
+    .split(path.delimiter)
+    .filter(Boolean)
+    .flatMap(dir => exts.map(ext => path.join(dir, `${binaryName}${ext}`)));
 }
 
-const OPENCLAW_ROOT = findOpenClawRoot();
+function findPackageRootFromPath(startPath) {
+  if (!startPath) return null;
+
+  let current = fs.existsSync(startPath) && fs.statSync(startPath).isDirectory()
+    ? fs.realpathSync(startPath)
+    : path.dirname(fs.realpathSync(startPath));
+
+  while (true) {
+    const pkgPath = path.join(current, 'package.json');
+    if (fs.existsSync(pkgPath)) {
+      try {
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+        if (pkg.name === 'openclaw') {
+          return current;
+        }
+      } catch {}
+    }
+
+    const parent = path.dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+}
+
+function readPackageVersion(packageRoot) {
+  try {
+    const pkgPath = path.join(packageRoot, 'package.json');
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+    return pkg.version ?? 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
+function inferOpenClawRootFromBinary() {
+  for (const executablePath of pathExecutableCandidates('openclaw')) {
+    if (!fs.existsSync(executablePath)) continue;
+    const packageRoot = findPackageRootFromPath(executablePath);
+    if (packageRoot) {
+      return packageRoot;
+    }
+  }
+  return null;
+}
+
+function findOpenClawRoot() {
+  const candidates = [];
+  const seen = new Set();
+  const addCandidate = (candidate, reason) => {
+    if (!candidate) return;
+    const resolvedPath = path.resolve(candidate);
+    if (seen.has(resolvedPath)) return;
+    seen.add(resolvedPath);
+    candidates.push({ path: resolvedPath, reason });
+  };
+
+  addCandidate(process.env.OPENCLAW_ROOT, 'OPENCLAW_ROOT');
+
+  try {
+    const url = import.meta.resolve?.('openclaw/package.json');
+    if (url) addCandidate(path.dirname(new URL(url).pathname), 'import.meta.resolve');
+  } catch {}
+
+  addCandidate(inferOpenClawRootFromBinary(), 'PATH:openclaw');
+
+  try {
+    const npmRoot = execFileSync('npm', ['root', '-g'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    addCandidate(path.join(npmRoot, 'openclaw'), 'npm root -g');
+  } catch {}
+
+  addCandidate(path.join(path.dirname(process.execPath), '../lib/node_modules/openclaw'), 'process.execPath');
+  addCandidate('/opt/homebrew/lib/node_modules/openclaw', 'homebrew-global');
+  addCandidate('/usr/local/lib/node_modules/openclaw', 'usr-local-global');
+  addCandidate(path.join(HOME, '.nvm/versions/node/current/lib/node_modules/openclaw'), 'nvm-current');
+
+  const nvmVersionsDir = path.join(HOME, '.nvm/versions/node');
+  if (fs.existsSync(nvmVersionsDir)) {
+    const versions = fs.readdirSync(nvmVersionsDir).sort().reverse();
+    for (const version of versions) {
+      addCandidate(path.join(nvmVersionsDir, version, 'lib/node_modules/openclaw'), `nvm:${version}`);
+    }
+  }
+
+  const existingCandidates = candidates
+    .filter(candidate => fs.existsSync(candidate.path))
+    .map(candidate => ({
+      ...candidate,
+      version: readPackageVersion(candidate.path),
+    }));
+
+  const resolvedCandidate = existingCandidates[0] ?? null;
+  return {
+    resolvedRoot: resolvedCandidate?.path ?? null,
+    resolvedCandidate,
+    existingCandidates,
+    checkedCandidates: candidates.map(candidate => `${candidate.reason}:${candidate.path}`),
+  };
+}
+
+const {
+  resolvedRoot: OPENCLAW_ROOT,
+  resolvedCandidate: OPENCLAW_SELECTED_CANDIDATE,
+  existingCandidates: OPENCLAW_EXISTING_CANDIDATES,
+  checkedCandidates: OPENCLAW_ROOT_CANDIDATES,
+} = findOpenClawRoot();
 if (!OPENCLAW_ROOT) {
-  console.error('ERROR: OpenClaw installation not found');
+  console.error(`ERROR: OpenClaw installation not found. Checked: ${OPENCLAW_ROOT_CANDIDATES.join(', ')}`);
   process.exit(1);
+}
+if (OPENCLAW_EXISTING_CANDIDATES.length > 1) {
+  const formattedCandidates = OPENCLAW_EXISTING_CANDIDATES
+    .map(candidate => `${candidate.path} (${candidate.version}, via ${candidate.reason})`)
+    .join('; ');
+  console.warn(
+    `WARN: Multiple OpenClaw installations found. Using ${OPENCLAW_SELECTED_CANDIDATE.path} ` +
+    `(${OPENCLAW_SELECTED_CANDIDATE.version}, via ${OPENCLAW_SELECTED_CANDIDATE.reason}). ` +
+    `Candidates: ${formattedCandidates}`
+  );
 }
 const openclawRequire = createRequire(path.join(OPENCLAW_ROOT, 'package.json'));
 
