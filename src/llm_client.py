@@ -5,6 +5,7 @@ import random
 import time
 from typing import Dict, Any, List
 from openai import OpenAI
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -18,8 +19,8 @@ class LLMClient:
         api_key: str,
         model: str,
         temperature: float = 0.7,
-        max_tokens: int | None = None,
-        timeout: float | None = None,
+        max_tokens:  Optional[int] = None,
+        timeout:  Optional[float] = None,
         retry_attempts: int = 3,
         retry_base_delay: float = 1.0,
         retry_max_delay: float = 8.0,
