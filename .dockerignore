@@ -1,0 +1,16 @@
+.git
+.github
+.venv
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.coverage
+.DS_Store
+output/
+output_bak/
+temp/
+config/config.yaml

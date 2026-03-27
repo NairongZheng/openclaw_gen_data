@@ -52,6 +52,8 @@
 
 ## 安装
 
+如果你直接在本机运行仓库，可以按下面步骤安装。
+
 1. 激活 Python 环境
 
 ```bash
@@ -366,3 +368,97 @@ python scripts/run_generation.py --refresh-tools --limit 1
 - `message / cron / web_fetch` 这类运行时动态 schema 工具的进一步补齐
 - 更细的错误重试与失败归因
 - 生成结果质量评估
+
+## Docker 镜像
+
+如果你更希望直接拿一个可用环境，而不是手动在本机配 Python / Node / OpenClaw，可以使用仓库里的 [Dockerfile](Dockerfile)。
+
+镜像里会提前装好：
+
+- Ubuntu 22.04
+- Node.js 24（通过 `nvm`）
+- Miniconda + `dev` Python 3.12 环境
+- [requirements.txt](requirements.txt) 中的 Python 依赖
+- `openclaw`
+- 常用开发/排障工具（`git`、`tmux`、`htop`、`tree`、`ssh` 等）
+
+### 本地构建 arm64 镜像
+
+适合 Apple Silicon 本机或同事的 macOS：
+
+```bash
+docker buildx build --platform linux/arm64 -t openclaw-gen-data:arm64 --load .
+```
+
+### 本地构建 amd64 镜像
+
+适合提前验证要推送到阿里云的版本：
+
+```bash
+docker buildx build --platform linux/amd64 -t openclaw-gen-data:amd64 --load .
+```
+
+### 进入环境镜像
+
+镜像默认启动一个已加载 conda 环境的交互式 shell：
+
+```bash
+docker run --rm -it openclaw-gen-data:arm64
+```
+
+如果你要在容器里操作当前仓库，建议挂载工作目录和 OpenClaw 状态目录：
+
+```bash
+docker run --rm -it \
+  -v $(pwd):/workspace \
+  -v ~/.openclaw:/root/.openclaw \
+  openclaw-gen-data:arm64
+```
+
+## CI 自动构建镜像
+
+当前工作流只使用阿里云镜像仓库，工作流文件见 [.github/workflows/docker-image.yml](.github/workflows/docker-image.yml)。
+
+触发规则：
+
+- PR：只做 `arm64` + `amd64` 构建校验，不推送
+- push 到 `main` / `master`：只做 `arm64` + `amd64` 构建校验，不推送
+- `workflow_dispatch`：手动触发后，按你选择把 `arm64`、`amd64` 推送到阿里云
+
+### GitHub Secrets
+
+工作流里阿里云推送依赖这些 Secrets：
+
+- `ALIYUN_REGISTRY`：例如 `registry.cn-hangzhou.aliyuncs.com`
+- `ALIYUN_NAMESPACE`：你的命名空间
+- `ALIYUN_USERNAME`：阿里云镜像仓库用户名
+- `ALIYUN_PASSWORD`：阿里云镜像仓库密码或访问令牌
+
+### 手动推送怎么用
+
+1. 进入 GitHub 仓库的 `Actions`
+2. 打开 `docker-image`
+3. 点击 `Run workflow`
+4. 填写参数：
+   - `image_tag`：例如 `v1.0.0`、`test-0327`
+   - `push_arm64`：是否推送 `arm64`
+   - `push_amd64`：是否推送 `amd64`
+5. 运行完成后，从阿里云仓库拉对应标签即可
+
+### 标签与拉取示例
+
+- `<aliyun-registry>/<namespace>/<repo>:manual-arm64`
+- `<aliyun-registry>/<namespace>/<repo>:manual-amd64`
+- `<aliyun-registry>/<namespace>/<repo>:v1.2.3-arm64`
+- `<aliyun-registry>/<namespace>/<repo>:v1.2.3-amd64`
+
+```bash
+docker pull <aliyun-registry>/<namespace>/<repo>:v1.0.0-arm64
+docker pull <aliyun-registry>/<namespace>/<repo>:v1.0.0-amd64
+```
+
+### 推荐做法
+
+- 本地和同事的 macOS：拉阿里云里的 `*-arm64` 标签
+- 阿里云或 x86 机器：拉阿里云里的 `*-amd64` 标签
+- 手动触发时把 `image_tag` 设成版本号，例如 `v1.2.3`
