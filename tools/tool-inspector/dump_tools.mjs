@@ -83,18 +83,9 @@ if (args['all-agents']) {
 
 // ── 自动探测 OpenClaw 安装路径 ────────────────────────────────────────────────
 
-function pathExecutableCandidates(binaryName) {
-  const pathEnv = process.env.PATH ?? '';
-  const exts = process.platform === 'win32'
-    ? (process.env.PATHEXT ?? '.EXE;.CMD;.BAT').split(';')
-    : [''];
-
-  return pathEnv
-    .split(path.delimiter)
-    .filter(Boolean)
-    .flatMap(dir => exts.map(ext => path.join(dir, `${binaryName}${ext}`)));
-}
-
+/**
+ * 从文件路径向上递归查找包含 package.json 且 name === 'openclaw' 的目录
+ */
 function findPackageRootFromPath(startPath) {
   if (!startPath) return null;
 
@@ -119,6 +110,9 @@ function findPackageRootFromPath(startPath) {
   }
 }
 
+/**
+ * 读取 package.json 中的版本号
+ */
 function readPackageVersion(packageRoot) {
   try {
     const pkgPath = path.join(packageRoot, 'package.json');
@@ -129,15 +123,38 @@ function readPackageVersion(packageRoot) {
   }
 }
 
+/**
+ * 使用 which/where 命令查找 openclaw 可执行文件，并推断安装路径
+ */
 function inferOpenClawRootFromBinary() {
-  for (const executablePath of pathExecutableCandidates('openclaw')) {
-    if (!fs.existsSync(executablePath)) continue;
-    const packageRoot = findPackageRootFromPath(executablePath);
-    if (packageRoot) {
-      return packageRoot;
+  try {
+    // Windows 使用 where，Unix/Linux/macOS 使用 which
+    const whichCmd = process.platform === 'win32' ? 'where' : 'which';
+
+    const whichResult = execFileSync(whichCmd, ['openclaw'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+
+    if (!whichResult) return null;
+
+    // Windows 的 where 可能返回多行，取第一行
+    const executablePath = whichResult.split('\n')[0].trim();
+
+    // 解析符号链接到真实路径
+    let realPath;
+    try {
+      realPath = fs.realpathSync(executablePath);
+    } catch {
+      realPath = executablePath;
     }
+
+    // 向上查找包含 package.json 且 name === 'openclaw' 的目录
+    return findPackageRootFromPath(realPath);
+  } catch {
+    // which/where 命令失败（openclaw 不在 PATH 中）
+    return null;
   }
-  return null;
 }
 
 function findOpenClawRoot() {
@@ -151,35 +168,41 @@ function findOpenClawRoot() {
     candidates.push({ path: resolvedPath, reason });
   };
 
+  // 优先级1: 环境变量（用户明确指定）
   addCandidate(process.env.OPENCLAW_ROOT, 'OPENCLAW_ROOT');
 
+  // 优先级2: which/where openclaw（当前 shell 实际执行的版本，最重要！）
+  // 这确保找到的是用户在终端输入 `openclaw` 时实际运行的版本
+  addCandidate(inferOpenClawRootFromBinary(), 'which/where:openclaw');
+
+  // 优先级3: import.meta.resolve（项目本地依赖）
+  // 如果项目将 openclaw 作为本地依赖安装，则使用本地版本
   try {
     const url = import.meta.resolve?.('openclaw/package.json');
     if (url) addCandidate(path.dirname(new URL(url).pathname), 'import.meta.resolve');
   } catch {}
 
-  addCandidate(inferOpenClawRootFromBinary(), 'PATH:openclaw');
-
+  // 优先级4: npm root -g（全局 npm 安装）
   try {
     const npmRoot = execFileSync('npm', ['root', '-g'], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
-    addCandidate(path.join(npmRoot, 'openclaw'), 'npm root -g');
+    addCandidate(path.join(npmRoot, 'openclaw'), 'npm:root-g');
   } catch {}
 
-  addCandidate(path.join(path.dirname(process.execPath), '../lib/node_modules/openclaw'), 'process.execPath');
-  addCandidate('/opt/homebrew/lib/node_modules/openclaw', 'homebrew-global');
-  addCandidate('/usr/local/lib/node_modules/openclaw', 'usr-local-global');
-  addCandidate(path.join(HOME, '.nvm/versions/node/current/lib/node_modules/openclaw'), 'nvm-current');
+  // 优先级5: node 当前运行时的相邻路径（确保和当前 node 版本匹配）
+  try {
+    const nodeDir = path.dirname(process.execPath);
+    // node 在 /xxx/bin/node，openclaw 可能在 ../lib/node_modules/openclaw
+    addCandidate(path.join(nodeDir, '../lib/node_modules/openclaw'), 'node:execPath');
+  } catch {}
 
-  const nvmVersionsDir = path.join(HOME, '.nvm/versions/node');
-  if (fs.existsSync(nvmVersionsDir)) {
-    const versions = fs.readdirSync(nvmVersionsDir).sort().reverse();
-    for (const version of versions) {
-      addCandidate(path.join(nvmVersionsDir, version, 'lib/node_modules/openclaw'), `nvm:${version}`);
-    }
+  // 优先级6: nvm 当前激活版本
+  if (process.env.NVM_BIN) {
+    addCandidate(path.join(process.env.NVM_BIN, '../lib/node_modules/openclaw'), 'nvm:current');
   }
+
 
   const existingCandidates = candidates
     .filter(candidate => fs.existsSync(candidate.path))
