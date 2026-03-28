@@ -6,9 +6,25 @@ ARG PYTHON_VERSION=3.12
 ARG CONDA_ENV_NAME=dev
 ARG OPENCLAW_INSTALL_URL=https://openclaw.ai/install.sh
 ARG MINICONDA_BASE_URL=https://repo.anaconda.com/miniconda
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+ARG http_proxy
+ARG https_proxy
+ARG no_proxy
 
 ENV DEBIAN_FRONTEND=noninteractive \
     TZ=Asia/Shanghai \
+    OPENCLAW_NO_PROMPT=1 \
+    OPENCLAW_NO_ONBOARD=1 \
+    OPENCLAW_AUTO_START_GATEWAY=1 \
+    OPENCLAW_GATEWAY_LOG=/root/.openclaw/gateway.log \
+    HTTP_PROXY=${HTTP_PROXY} \
+    HTTPS_PROXY=${HTTPS_PROXY} \
+    NO_PROXY=${NO_PROXY} \
+    http_proxy=${http_proxy} \
+    https_proxy=${https_proxy} \
+    no_proxy=${no_proxy} \
     NVM_DIR=/root/.nvm \
     CONDA_DIR=/opt/miniconda3 \
     PATH=/opt/node/bin:/opt/miniconda3/bin:/root/.local/bin:$PATH
@@ -77,12 +93,18 @@ RUN export OPENCLAW_NO_PROMPT=1 OPENCLAW_NO_ONBOARD=1 \
     && ln -sfn "$OPENCLAW_BIN" /usr/local/bin/openclaw \
     && openclaw --version >/dev/null 2>&1 || true
 
+RUN openclaw onboard --non-interactive --accept-risk --flow quickstart --mode local \
+    --auth-choice skip --skip-channels --skip-search --skip-skills --skip-ui --skip-daemon --skip-health --json
+
 RUN cat <<'EOF' >/etc/profile.d/openclaw-env.sh
 export NVM_DIR="/root/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
 source /opt/miniconda3/etc/profile.d/conda.sh
 conda activate dev
 EOF
+
+COPY . /workspace
+RUN chmod +x /workspace/scripts/start_generation_in_container.sh
 
 WORKDIR /workspace
 

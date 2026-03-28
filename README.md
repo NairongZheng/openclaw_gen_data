@@ -398,22 +398,56 @@ docker buildx build --platform linux/arm64 -t openclaw-gen-data:arm64 --load .
 docker buildx build --platform linux/amd64 -t openclaw-gen-data:amd64 --load .
 ```
 
-### 进入环境镜像
-
-镜像默认启动一个已加载 conda 环境的交互式 shell：
+如果构建环境需要代理，可追加：
 
 ```bash
-docker run --rm -it openclaw-gen-data:arm64
+docker buildx build \
+  --platform linux/amd64 \
+  --build-arg http_proxy=http://10.120.6.220:7890 \
+  --build-arg https_proxy=http://10.120.6.220:7890 \
+  --build-arg HTTP_PROXY=http://10.120.6.220:7890 \
+  --build-arg HTTPS_PROXY=http://10.120.6.220:7890 \
+  -t openclaw-gen-data:amd64 --load .
 ```
 
-如果你要在容器里操作当前仓库，建议挂载工作目录和 OpenClaw 状态目录：
+### 进入环境镜像
+
+如果要直接在容器里跑完整流程（初始化 agents + 生成数据），可以直接调用镜像内置脚本：
 
 ```bash
 docker run --rm -it \
-  -v $(pwd):/workspace \
-  -v ~/.openclaw:/root/.openclaw \
-  openclaw-gen-data:arm64
+  -v /data/config.yaml:/tmp/config.yaml:ro \
+  -v /data/my-output:/data/my-output \
+  -e CONFIG_PATH=/tmp/config.yaml \
+  -e OUTPUT_DIR=/data/my-output \
+  -e CONCURRENT_NUM=10 \
+  openclaw-gen-data:amd64 \
+  /workspace/scripts/start_generation_in_container.sh
 ```
+
+### 启动脚本参数说明
+
+脚本 `/workspace/scripts/start_generation_in_container.sh` 支持以下环境变量：
+
+| 变量 | 是否必须 | 说明 |
+|------|----------|------|
+| `OUTPUT_DIR` | **必须** | 宿主机持久化输出目录，容器内 `output/` 会软链到这里 |
+| `CONFIG_PATH` | 可选 | mnt 里 `config.yaml` 的路径，脚本会自动 cp 到 `/workspace/config/config.yaml` |
+| `CONCURRENT_NUM` | 可选 | 并发数，默认 `10` |
+
+示例：
+
+```bash
+docker run --rm \
+  -v /mnt/data:/mnt/data \
+  -e CONFIG_PATH=/mnt/data/config.yaml \
+  -e OUTPUT_DIR=/mnt/data/output \
+  -e CONCURRENT_NUM=10 \
+  openclaw-gen-data:amd64 \
+  /workspace/scripts/start_generation_in_container.sh
+```
+
+> `openclaw.json` 使用镜像构建时自动初始化的配置，无需外部注入。
 
 ## CI 自动构建镜像
 
