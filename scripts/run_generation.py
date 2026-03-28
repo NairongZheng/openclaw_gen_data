@@ -337,6 +337,23 @@ def process_intent(
             conversation_history.append({"role": "user", "content": query})
             conversation_history.append({"role": "assistant", "content": assistant_text})
 
+        # 只有当 LLM 明确完成流程时，才进行 session 归档和中间格式转换
+        if not completed:
+            logger.warning(f"[{agent_name}] Intent {intent_id} 未完全完成（completion_reason={completion_reason}），跳过归档和转换")
+            try:
+                openclaw.reset_main_session()
+            except Exception as reset_error:
+                logger.warning(f"[{agent_name}] reset 失败: {reset_error}")
+            return {
+                "intent_id": str(intent_id),
+                "status": "failed",
+                "agent_name": agent_name,
+                "error": f"未完成：{completion_reason}",
+                "completed": completed,
+                "completion_reason": completion_reason,
+                "turns": len(conversation_history) // 2,
+            }
+
         session_info = openclaw.get_current_session_info()
         if not session_info:
             raise RuntimeError(f"[{agent_name}] 未找到 session 信息，无法归档")
