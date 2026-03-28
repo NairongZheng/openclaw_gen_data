@@ -435,6 +435,7 @@ def main():
 
     parser = argparse.ArgumentParser(description="OpenClaw 数据生成")
     parser.add_argument("--config", default="config/config.yaml", help="配置文件")
+    parser.add_argument("--intents-file", help="覆盖配置中的 intents 文件路径")
     parser.add_argument("--limit", type=int, help="限制处理数量")
     parser.add_argument("--concurrent", type=int, help="并发数")
     parser.add_argument("--refresh-tools", action="store_true", help="启动前强制刷新完整 tools catalog")
@@ -489,7 +490,9 @@ def main():
             logger.error(f"刷新工具列表失败: {e}")
             # 继续执行，使用现有缓存或退回 session 元数据
 
-    intents = load_intents(paths_config["intents_file"])
+    intents_file = args.intents_file or paths_config["intents_file"]
+    logger.info(f"使用 intents 文件: {intents_file}")
+    intents = load_intents(intents_file)
     logger.info(f"加载 {len(intents)} 个 intents")
 
     if args.limit:

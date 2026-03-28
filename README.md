@@ -410,16 +410,18 @@ docker buildx build \
   -t openclaw-gen-data:amd64 --load .
 ```
 
-### 进入环境镜像
+### 使用容器跑generation
 
 如果要直接在容器里跑完整流程（初始化 agents + 生成数据），可以直接调用镜像内置脚本：
 
 ```bash
 docker run --rm -it \
-  -v /data/config.yaml:/tmp/config.yaml:ro \
-  -v /data/my-output:/data/my-output \
+  -v /local_path/to/config.yaml:/tmp/config.yaml:ro \
+  -v /local_path/to/intents.jsonl:/tmp/intents.jsonl:ro \
+  -v /local_path/to/output:/tmp/output \
   -e CONFIG_PATH=/tmp/config.yaml \
-  -e OUTPUT_DIR=/data/my-output \
+  -e OUTPUT_DIR=/tmp/output \
+  -e INTENTS_FILE=/tmp/intents.jsonl \
   -e CONCURRENT_NUM=10 \
   openclaw-gen-data:amd64 \
   /workspace/scripts/start_generation_in_container.sh
@@ -433,21 +435,13 @@ docker run --rm -it \
 |------|----------|------|
 | `OUTPUT_DIR` | **必须** | 宿主机持久化输出目录，容器内 `output/` 会软链到这里 |
 | `CONFIG_PATH` | 可选 | mnt 里 `config.yaml` 的路径，脚本会自动 cp 到 `/workspace/config/config.yaml` |
+| `INTENTS_FILE` | 可选 | 覆盖 `config.yaml` 里的 `paths.intents_file`，可指定任意 intents 文件 |
 | `CONCURRENT_NUM` | 可选 | 并发数，默认 `10` |
 
-示例：
-
-```bash
-docker run --rm \
-  -v /mnt/data:/mnt/data \
-  -e CONFIG_PATH=/mnt/data/config.yaml \
-  -e OUTPUT_DIR=/mnt/data/output \
-  -e CONCURRENT_NUM=10 \
-  openclaw-gen-data:amd64 \
-  /workspace/scripts/start_generation_in_container.sh
-```
 
 > `openclaw.json` 使用镜像构建时自动初始化的配置，无需外部注入。
+>
+> 脚本内部使用 `conda run --no-capture-output`，日志会实时打印到容器标准输出。
 
 ## CI 自动构建镜像
 

@@ -10,15 +10,20 @@ OUTPUT_DIR="${OUTPUT_DIR:?请设置 OUTPUT_DIR 环境变量，指向输出目录
 # ====================================================
 # 可选配置（不传则跳过）
 # CONFIG_PATH          : 项目 config.yaml 的路径（mnt 挂载进来后直接 cp）
+# INTENTS_FILE         : intents.jsonl 路径（mnt 挂载进来的路径），用于覆盖 config 里的 paths.intents_file
 # CONCURRENT_NUM       : 并发数，默认 10
 # ====================================================
 CONFIG_PATH="${CONFIG_PATH:-}"
+INTENTS_FILE="${INTENTS_FILE:-}"
 CONCURRENT_NUM="${CONCURRENT_NUM:-10}"
 
 CONDA_DIR="${CONDA_DIR:-/opt/miniconda3}"
 CONDA_ENV_NAME="${CONDA_ENV_NAME:-dev}"
 GATEWAY_LOG="${OPENCLAW_GATEWAY_LOG:-/root/.openclaw/gateway.log}"
 WORK_DIR="/workspace"
+
+# 让 Python stdout/stderr 立即刷新，便于容器日志实时查看
+export PYTHONUNBUFFERED=1
 
 cd "${WORK_DIR}"
 
@@ -45,13 +50,23 @@ else
 fi
 
 # 4) 初始化 agents
-"${CONDA_DIR}/bin/conda" run -n "${CONDA_ENV_NAME}" \
+"${CONDA_DIR}/bin/conda" run --no-capture-output -n "${CONDA_ENV_NAME}" \
   python scripts/init_agents.py \
     --num-agents "${CONCURRENT_NUM}" \
     --force-recreate \
     --refresh-tools
 
 # 5) 运行数据生成
-"${CONDA_DIR}/bin/conda" run -n "${CONDA_ENV_NAME}" \
-  python scripts/run_generation.py \
-    --concurrent "${CONCURRENT_NUM}"
+RUN_GENERATION_CMD=(
+  "${CONDA_DIR}/bin/conda" run --no-capture-output -n "${CONDA_ENV_NAME}"
+  python scripts/run_generation.py
+  --concurrent "${CONCURRENT_NUM}"
+)
+
+if [[ -n "${INTENTS_FILE}" ]]; then
+  RUN_GENERATION_CMD+=(--intents-file "${INTENTS_FILE}")
+  echo "[start] intents file override: ${INTENTS_FILE}"
+fi
+
+echo "[start] run_generation started"
+"${RUN_GENERATION_CMD[@]}"
