@@ -97,6 +97,8 @@ jobs:
           file: ./Dockerfile
           platforms: linux/arm64
           push: true
+          provenance: false
+          sbom: false
           tags: ${{ steps.meta_aliyun_arm64.outputs.tags }}
           labels: ${{ steps.meta_aliyun_arm64.outputs.labels }}
           cache-from: type=gha,scope=aliyun-arm64
@@ -137,6 +139,8 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64
           push: true
+          provenance: false
+          sbom: false
           tags: ${{ steps.meta_aliyun.outputs.tags }}
           labels: ${{ steps.meta_aliyun.outputs.labels }}
           cache-from: type=gha,scope=aliyun-amd64

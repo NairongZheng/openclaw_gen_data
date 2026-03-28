@@ -2,12 +2,11 @@
 import argparse
 import logging
 import queue
-import shutil
 import signal
-import subprocess
 import os
 import sys
 import threading
+import time
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional
@@ -19,21 +18,30 @@ else:
     sys.path.insert(0, str(Path(os.getcwd())))
 
 from src.config import load_config
+from src.agent_runtime import cleanup_agents, restore_workspace_snapshot
 from src.intent_loader import load_intents
 from src.openclaw_wrapper import OpenClawWrapper, ensure_agents
 from src.llm_client import LLMClient
 from src.converter import DataConverter
+from src.runtime_recovery import (
+    backup_openclaw_config_to_output,
+    looks_like_config_corruption_error,
+    recover_openclaw_runtime_from_baseline,
+    resolve_openclaw_runtime_paths,
+)
 from src.utils import ensure_dir, load_json, save_json, setup_logging
 
 logger = logging.getLogger(__name__)
-
-SHARED_WORKSPACE_SNAPSHOT_NAME = "_template"
 
 # 全局变量用于优雅退出
 _shutdown_requested = threading.Event()
 _active_agents: List[str] = []
 _active_config: Optional[Dict[str, Any]] = None
 _executor: Optional[ThreadPoolExecutor] = None
+_runtime_recovery_requested = threading.Event()
+_runtime_recovery_reason_lock = threading.Lock()
+_runtime_recovery_reason: str = ""
+_runtime_recovery_requested_at: Optional[float] = None
 
 
 def resolve_project_root() -> Path:
@@ -41,12 +49,6 @@ def resolve_project_root() -> Path:
     if '__file__' in globals():
         return Path(__file__).parent.parent
     return Path(os.getcwd())
-
-
-def get_workspace_snapshot_dir(project_root: Optional[Path] = None) -> Path:
-    """返回 workspace 快照根目录。"""
-    root = project_root or resolve_project_root()
-    return root / "output" / "workspace_snapshots"
 
 
 def create_llm_client(config: Dict[str, Any]) -> LLMClient:
@@ -65,72 +67,45 @@ def create_llm_client(config: Dict[str, Any]) -> LLMClient:
     )
 
 
-def cleanup_agents(agent_ids: List[str], config: Dict[str, Any]) -> None:
-    """清理所有 agents 的 session、锁文件，并恢复 workspace 快照。
+def request_runtime_recovery(reason: str) -> None:
+    """请求全局运行时恢复（停止当前批次，回滚配置后重跑）。"""
+    global _runtime_recovery_reason, _runtime_recovery_requested_at
+    with _runtime_recovery_reason_lock:
+        if not _runtime_recovery_reason:
+            _runtime_recovery_reason = reason
+        if _runtime_recovery_requested_at is None:
+            _runtime_recovery_requested_at = time.perf_counter()
+    _runtime_recovery_requested.set()
 
-    Args:
-        agent_ids: 要清理的 agent 名称列表
-        config: 配置字典
-    """
-    logger.info("开始清理 agents 资源...")
 
-    # 0. 杀死所有正在运行的 openclaw 子进程
-    try:
-        import psutil
-        current_process = psutil.Process()
-        children = current_process.children(recursive=True)
-        for child in children:
-            try:
-                if 'openclaw' in ' '.join(child.cmdline()).lower():
-                    logger.info(f"终止 openclaw 子进程 {child.pid}")
-                    child.terminate()
-            except Exception:
-                pass
-        # 等待最多 2 秒让进程正常退出
-        import time
-        time.sleep(0.5)
-        for child in children:
-            try:
-                if child.is_running():
-                    child.kill()
-            except Exception:
-                pass
-    except ImportError:
-        # psutil 不可用，跳过
-        logger.warning("psutil 不可用，跳过子进程清理")
-    except Exception as e:
-        logger.warning(f"清理子进程失败: {e}")
+def consume_runtime_recovery_state() -> tuple[str, Optional[float]]:
+    global _runtime_recovery_reason, _runtime_recovery_requested_at
+    with _runtime_recovery_reason_lock:
+        reason = _runtime_recovery_reason
+        requested_at = _runtime_recovery_requested_at
+        _runtime_recovery_reason = ""
+        _runtime_recovery_requested_at = None
+    return reason, requested_at
 
-    for agent_name in agent_ids:
-        try:
-            # 1. Reset agent session
-            wrapper = OpenClawWrapper(agent_name)
-            wrapper.reset_main_session()
-            logger.debug(f"已重置 {agent_name} 的 session")
-        except Exception as e:
-            logger.warning(f"重置 {agent_name} session 失败: {e}")
 
-        try:
-            # 2. 清理锁文件
-            agent_dir = Path.home() / ".openclaw" / "agents" / agent_name / "sessions"
-            if agent_dir.exists():
-                lock_files = list(agent_dir.glob("*.lock"))
-                for lock_file in lock_files:
-                    try:
-                        lock_file.unlink()
-                        logger.debug(f"已删除锁文件: {lock_file.name}")
-                    except Exception as e:
-                        logger.warning(f"删除锁文件失败 {lock_file}: {e}")
-        except Exception as e:
-            logger.warning(f"清理 {agent_name} 锁文件失败: {e}")
+def summarize_final_results(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """按 intent 聚合结果，保留每个 intent 的最终状态。"""
+    latest_results_by_intent: Dict[str, Dict[str, Any]] = {}
+    for result in results:
+        intent_id = str(result.get("intent_id", "unknown"))
+        latest_results_by_intent[intent_id] = result
 
-        try:
-            # 3. 恢复 workspace 快照
-            restore_workspace_snapshot(agent_name, config)
-        except Exception as e:
-            logger.warning(f"恢复 {agent_name} workspace 快照失败: {e}")
-
-    logger.info(f"✓ 已清理 {len(agent_ids)} 个 agents")
+    final_results = list(latest_results_by_intent.values())
+    success = sum(1 for result in final_results if result.get("status") == "success")
+    failed = sum(1 for result in final_results if result.get("status") == "failed")
+    return {
+        "total": len(final_results),
+        "success": success,
+        "failed": failed,
+        "results": final_results,
+        "attempt_total": len(results),
+        "attempt_results": results,
+    }
 
 
 def signal_handler(signum, frame):
@@ -229,54 +204,24 @@ def extract_available_tool_entries(session_info: Dict[str, Any]) -> List[Dict[st
     return (session_info or {}).get("systemPromptReport", {}).get("tools", {}).get("entries", [])
 
 
-def restore_workspace_snapshot(agent_name: str, config: Dict[str, Any]) -> None:
-    """从快照恢复 agent workspace。
+def _build_interrupted_result(
+    intent_id: Any,
+    agent_name: str,
+    conversation_history: List[Dict[str, Any]],
+    reason: str,
+) -> Dict[str, Any]:
+    return {
+        "intent_id": str(intent_id),
+        "status": "failed",
+        "agent_name": agent_name,
+        "error": f"中断：{reason}",
+        "completed": False,
+        "completion_reason": reason,
+        "turns": len(conversation_history) // 2,
+        "recovery_interrupted": True,
+    }
 
-    Args:
-        agent_name: agent 名称
-        config: 配置字典
-    """
-    from src.openclaw_wrapper import expected_agent_workspace, resolve_workspace_root
 
-    workspace_root = config["openclaw"].get("workspace_root")
-    root_dir = resolve_workspace_root(workspace_root)
-    workspace = expected_agent_workspace(agent_name, str(root_dir))
-    snapshot_root = get_workspace_snapshot_dir()
-    shared_snapshot_path = snapshot_root / SHARED_WORKSPACE_SNAPSHOT_NAME
-    agent_snapshot_path = snapshot_root / agent_name
-    snapshot_path = shared_snapshot_path if shared_snapshot_path.exists() else agent_snapshot_path
-
-    if not snapshot_path.exists():
-        logger.warning(f"Agent {agent_name} 的快照不存在，跳过恢复: {snapshot_path}")
-        return
-
-    # 删除当前 workspace 的内容（保留 .git）
-    if workspace.exists():
-        for item in workspace.iterdir():
-            if item.name == '.git':
-                continue
-            try:
-                if item.is_dir():
-                    shutil.rmtree(item)
-                else:
-                    item.unlink()
-            except Exception as e:
-                logger.warning(f"删除 {item} 失败: {e}")
-
-    # 从快照恢复（排除 .git）
-    for item in snapshot_path.iterdir():
-        if item.name == '.git':
-            continue
-        dest = workspace / item.name
-        try:
-            if item.is_dir():
-                shutil.copytree(item, dest, symlinks=False)
-            else:
-                shutil.copy2(item, dest)
-        except Exception as e:
-            logger.warning(f"恢复 {item} 失败: {e}")
-
-    logger.info("已从快照 %s 恢复 agent %s 的 workspace", snapshot_path.name, agent_name)
 
 
 def process_intent(
@@ -304,6 +249,10 @@ def process_intent(
         completion_reason = "reached_max_turns"
 
         for turn in range(max_turns):
+            if _shutdown_requested.is_set() or _runtime_recovery_requested.is_set():
+                logger.info(f"[{agent_name}] 在 Turn {turn + 1} 前检测到恢复/退出请求，提前结束")
+                return _build_interrupted_result(intent_id, agent_name, conversation_history, "runtime_recovery_requested")
+
             logger.info(f"[{agent_name}] Turn {turn + 1}/{max_turns}")
 
             llm_result = llm.generate_next_query(
@@ -311,6 +260,10 @@ def process_intent(
                 persona=intent_data.get("metadata", {}).get("persona", {}),
                 conversation_history=conversation_history,
             )
+
+            if _shutdown_requested.is_set() or _runtime_recovery_requested.is_set():
+                logger.info(f"[{agent_name}] LLM 返回后检测到恢复/退出请求，跳过后续发送")
+                return _build_interrupted_result(intent_id, agent_name, conversation_history, "runtime_recovery_requested")
 
             if llm_result.get("completed", False):
                 logger.info(f"[{agent_name}] 任务完成: {llm_result.get('reason', '')}")
@@ -331,6 +284,10 @@ def process_intent(
                 timeout=config["generation"]["timeout"],
                 thinking=config["openclaw"].get("thinking"),
             )
+
+            if _shutdown_requested.is_set() or _runtime_recovery_requested.is_set():
+                logger.info(f"[{agent_name}] OpenClaw 返回后检测到恢复/退出请求，提前结束当前 intent")
+                return _build_interrupted_result(intent_id, agent_name, conversation_history, "runtime_recovery_requested")
 
             assistant_text = OpenClawWrapper.extract_assistant_text(response)
 
@@ -434,15 +391,36 @@ def worker_loop(
 
     results: List[Dict[str, Any]] = []
     while True:
+        if _shutdown_requested.is_set() or _runtime_recovery_requested.is_set():
+            break
+
         try:
             intent_data = task_queue.get_nowait()
         except queue.Empty:
             break
 
         result = process_intent(intent_data, agent_name, config, worker_tools, llm, converter)
+
+        # 运行时全局恢复：若失败像是 openclaw.json 被污染，通知主线程停止当前批次并重跑
+        if result.get("status") == "failed" and not result.get("recovery_interrupted"):
+            runtime_paths = resolve_openclaw_runtime_paths()
+            error_message = str(result.get("error", ""))
+            if looks_like_config_corruption_error(
+                error_message,
+                runtime_paths["config_file"],
+                runtime_paths["baseline_file"],
+            ):
+                intent_id = str(intent_data.get("id", "unknown"))
+                logger.warning("[%s] intent=%s 检测到疑似配置污染，触发全局恢复", agent_name, intent_id)
+                request_runtime_recovery(error_message)
+                result["triggered_global_recovery"] = True
+
         progress.record(result)
         results.append(result)
         task_queue.task_done()
+
+        if _runtime_recovery_requested.is_set():
+            break
 
     return results
 
@@ -492,6 +470,9 @@ def main():
         len(ensure_result.get("deleted", [])),
     )
 
+    # 注意：在 ensure_agents 完成后再备份 baseline，避免把异常状态保存进去。
+    backup_openclaw_config_to_output(paths_config)
+
     # 如果需要刷新工具列表，重新生成所有 agents 的工具
     if args.refresh_tools:
         from scripts.init_agents import generate_all_agents_tools
@@ -516,53 +497,106 @@ def main():
         intents = intents[:args.limit]
 
     progress = ProgressTracker(paths_config["progress_file"])
-    pending_intents = [intent for intent in intents if not progress.is_success(str(intent.get("id", "unknown")))]
-
-    if not pending_intents:
-        logger.info("没有待处理的 intents，当前任务已全部完成")
-        return
+    max_global_restarts = int(os.environ.get("OPENCLAW_CONFIG_MAX_AUTO_RESTARTS", "20"))
+    global_restart_count = 0
+    all_results: List[Dict[str, Any]] = []
 
     logger.info(f"并发数: {num_workers}")
-    logger.info(f"待处理 intents: {len(pending_intents)}")
 
     # 设置活跃的 agent 列表（用于 Ctrl+C 清理）
     _active_agents = [f"{worker_prefix}-{i+1}" for i in range(num_workers)]
 
-    task_queue: "queue.Queue[Dict[str, Any]]" = queue.Queue()
-    for intent in pending_intents:
-        task_queue.put(intent)
+    while True:
+        pending_intents = [intent for intent in intents if not progress.is_success(str(intent.get("id", "unknown")))]
 
-    results: List[Dict[str, Any]] = []
-    with ThreadPoolExecutor(max_workers=num_workers) as executor:
-        _executor = executor  # 设置全局 executor（用于 Ctrl+C 终止）
-        futures = []
-        for worker_index in range(1, num_workers + 1):
-            agent_name = f"{worker_prefix}-{worker_index}"
-            # 传递 tools_cache_file 而不是预加载的 tools_catalog
-            future = executor.submit(
-                worker_loop,
-                agent_name,
-                task_queue,
-                config,
-                paths_config["tools_cache_file"],
-                progress
+        if not pending_intents:
+            logger.info("没有待处理的 intents，当前任务已全部完成")
+            break
+
+        logger.info(
+            "开始一轮 generation：待处理 %s，已触发自动恢复 %s/%s 次",
+            len(pending_intents),
+            global_restart_count,
+            max_global_restarts,
+        )
+
+        _runtime_recovery_requested.clear()
+        consume_runtime_recovery_state()
+
+        task_queue: "queue.Queue[Dict[str, Any]]" = queue.Queue()
+        for intent in pending_intents:
+            task_queue.put(intent)
+
+        round_results: List[Dict[str, Any]] = []
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            _executor = executor  # 设置全局 executor（用于 Ctrl+C 终止）
+            futures = []
+            for worker_index in range(1, num_workers + 1):
+                agent_name = f"{worker_prefix}-{worker_index}"
+                future = executor.submit(
+                    worker_loop,
+                    agent_name,
+                    task_queue,
+                    config,
+                    paths_config["tools_cache_file"],
+                    progress
+                )
+                futures.append(future)
+
+            for future in as_completed(futures):
+                worker_results = future.result()
+                round_results.extend(worker_results)
+
+        all_results.extend(round_results)
+
+        if not _runtime_recovery_requested.is_set():
+            logger.info("当前轮次未触发全局恢复")
+            break
+
+        reason, requested_at = consume_runtime_recovery_state()
+        reason = reason or "unknown"
+        if requested_at is not None:
+            logger.warning(
+                "全局恢复触发后等待本轮 worker 收口耗时 %.2fs",
+                time.perf_counter() - requested_at,
             )
-            futures.append(future)
+        logger.warning("检测到配置污染风险，准备停止并恢复后重跑。原因: %s", reason)
 
-        for future in as_completed(futures):
-            worker_results = future.result()
-            results.extend(worker_results)
-            logger.info(f"当前累计完成: {len(results)}/{len(pending_intents)}")
+        if global_restart_count >= max_global_restarts:
+            logger.error("已达到自动恢复上限（%s 次），停止自动重启", max_global_restarts)
+            break
 
-    success = sum(1 for r in results if r["status"] == "success")
-    logger.info(f"完成: 成功 {success}, 失败 {len(results) - success}")
+        recovery_started_at = time.perf_counter()
+        recovered = recover_openclaw_runtime_from_baseline(reason)
+        logger.warning("运行时恢复阶段耗时 %.2fs", time.perf_counter() - recovery_started_at)
+        if not recovered:
+            logger.error("自动恢复失败，停止自动重启")
+            break
+
+        cleanup_started_at = time.perf_counter()
+        cleanup_agents(_active_agents, config)
+        logger.warning("恢复后的 cleanup 阶段耗时 %.2fs", time.perf_counter() - cleanup_started_at)
+        global_restart_count += 1
+        logger.warning("自动恢复完成，准备重新运行 generation（第 %s 次）", global_restart_count)
+
+    final_summary = summarize_final_results(all_results)
+    logger.info(
+        "完成: 最终成功 %s, 最终失败 %s, 总尝试 %s",
+        final_summary["success"],
+        final_summary["failed"],
+        final_summary["attempt_total"],
+    )
 
     save_json(
         {
-            "total": len(results),
-            "success": success,
-            "failed": len(results) - success,
-            "results": results,
+            "total": final_summary["total"],
+            "success": final_summary["success"],
+            "failed": final_summary["failed"],
+            "results": final_summary["results"],
+            "attempt_total": final_summary["attempt_total"],
+            "attempt_results": final_summary["attempt_results"],
+            "global_auto_restarts": global_restart_count,
+            "global_auto_restart_limit": max_global_restarts,
         },
         f"{paths_config['output_dir']}/summary.json",
     )
