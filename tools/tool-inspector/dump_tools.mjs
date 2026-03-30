@@ -270,19 +270,38 @@ const PI_TOOLS = path.join(OPENCLAW_ROOT, 'node_modules/@mariozechner/pi-coding-
 
 // ── Bundle 工具提取（全自动扫描，不预设工具名） ────────────────────────────────
 
-/** 找含有最多内置工具定义的 bundle 文件 */
-function findBestBundle() {
-  // 这些工具名必须同时出现，才说明是包含内置工具定义的 bundle
+/**
+ * 收集候选 bundle。
+ * 新版 OpenClaw 会把工具定义拆到多个 dist bundle 里；
+ * 这里只做排序，不再只选一个“最佳 bundle”，避免 memory_* 等工具漏扫。
+ */
+function findCandidateBundles() {
   const REQUIRED = ['name: "exec"', 'name: "cron"', 'name: "browser"', 'name: "sessions_spawn"'];
-  const BONUS    = ['name: "gateway"', 'name: "nodes"', 'name: "tts"', 'BrowserToolSchema', 'CronToolSchema'];
-  let best = null, bestScore = 0;
-  for (const f of fs.readdirSync(DIST).filter(f => f.endsWith('.js'))) {
-    const src = fs.readFileSync(path.join(DIST, f), 'utf8');
-    if (!REQUIRED.every(m => src.includes(m))) continue;
-    const score = BONUS.filter(m => src.includes(m)).length;
-    if (score > bestScore) { best = { file: f, src }; bestScore = score; }
-  }
-  return best;
+  const BONUS = [
+    'name: "gateway"',
+    'name: "nodes"',
+    'name: "tts"',
+    'name: "memory_search"',
+    'name: "memory_get"',
+    'name: "subagents"',
+    'BrowserToolSchema',
+    'CronToolSchema',
+  ];
+
+  return fs.readdirSync(DIST)
+    .filter(f => f.endsWith('.js'))
+    .map(file => {
+      const src = fs.readFileSync(path.join(DIST, file), 'utf8');
+      const requiredMatches = REQUIRED.filter(marker => src.includes(marker)).length;
+      const bonusMatches = BONUS.filter(marker => src.includes(marker)).length;
+      return {
+        file,
+        src,
+        score: requiredMatches * 10 + bonusMatches,
+      };
+    })
+    .filter(bundle => bundle.score > 0)
+    .sort((a, b) => b.score - a.score || a.file.localeCompare(b.file));
 }
 
 /** 提取所有大写字母开头的数组/数字常量，用于 eval 时注入 */
@@ -417,42 +436,79 @@ function extractDescription(src, nameIdx) {
 
 /** 全自动扫描 bundle，提取所有工具定义 */
 async function extractBuiltinTools() {
-  const bundle = findBestBundle();
-  if (!bundle) { console.error('WARN: no bundle found'); return []; }
-
-  const { src } = bundle;
-  const consts = extractAllConsts(src);
-  const cache  = {}; // schema 缓存，避免重复解析
+  const bundles = findCandidateBundles();
+  if (!bundles.length) { console.error('WARN: no candidate bundle found'); return []; }
 
   // 工具名白名单：必须是 snake_case，且包含 description + parameters
   const TOOL_NAME_RE = /^[a-z][a-z0-9_]{1,50}$/;
 
   const tools = [];
   const seen  = new Set();
-  const nameRe = /\bname:\s*"([^"]+)"/g;
-  let m;
 
-  while ((m = nameRe.exec(src)) !== null) {
-    const toolName = m[1];
-    if (!TOOL_NAME_RE.test(toolName)) continue;
-    if (seen.has(toolName)) continue;
+  for (const bundle of bundles) {
+    const { src } = bundle;
+    const consts = extractAllConsts(src);
+    const cache  = {};
+    const nameRe = /\bname:\s*"([^"]+)"/g;
+    let m;
 
-    const schema = resolveParametersNearName(src, m.index, consts, cache);
-    if (!schema) continue; // 没有 parameters 或解析失败 → 不是工具定义
+    while ((m = nameRe.exec(src)) !== null) {
+      const toolName = m[1];
+      if (!TOOL_NAME_RE.test(toolName)) continue;
+      if (seen.has(toolName)) continue;
 
-    const description = extractDescription(src, m.index);
-    seen.add(toolName);
-    tools.push({
-      name: toolName,
-      description,
-      parameters: JSON.parse(JSON.stringify(schema)),
-      source: 'builtin',
-    });
+      const schema = resolveParametersNearName(src, m.index, consts, cache);
+      if (!schema) continue;
+
+      const description = extractDescription(src, m.index);
+      seen.add(toolName);
+      tools.push({
+        name: toolName,
+        description,
+        parameters: JSON.parse(JSON.stringify(schema)),
+        source: 'builtin',
+      });
+    }
+
+    const fnSchemaRe = /\bname:\s*"([a-z][a-z0-9_]{1,50})"[^{]{0,200}?parameters:\s*(create[A-Za-z]+Schema)\s*\(/gs;
+    let fm;
+    while ((fm = fnSchemaRe.exec(src)) !== null) {
+      const toolName = fm[1];
+      const fnName   = fm[2];
+      if (seen.has(toolName)) continue;
+
+      const fnMarker = `function ${fnName}`;
+      const fnIdx = src.indexOf(fnMarker);
+      if (fnIdx === -1) continue;
+
+      let depth = 0, i = fnIdx;
+      while (i < src.length) {
+        if (src[i] === '{') depth++;
+        else if (src[i] === '}') { depth--; if (depth === 0) break; }
+        i++;
+      }
+      const fnBody = src.slice(fnIdx, i + 1);
+      const constCode = Object.entries(consts).map(([k, v]) => `const ${k} = ${JSON.stringify(v)};`).join('\n');
+      let schema;
+      try {
+        schema = new Function('Type', constCode + '\n' + fnBody + `\nreturn ${fnName}({});`)(Type);
+      } catch { continue; }
+
+      const description = extractDescription(src, fm.index);
+      seen.add(toolName);
+      tools.push({
+        name: toolName,
+        description,
+        parameters: JSON.parse(JSON.stringify(schema)),
+        source: 'builtin',
+      });
+    }
   }
 
   // ── web_search fallback：schema 是运行时动态生成无法自动扫描，用标准参数构造 ──
   if (!seen.has('web_search')) {
-    const wsDesc = extractDescription(src, src.indexOf('name: "web_search"'));
+    const descBundle = bundles.find(bundle => bundle.src.includes('name: "web_search"'));
+    const wsDesc = descBundle ? extractDescription(descBundle.src, descBundle.src.indexOf('name: "web_search"')) : '';
     tools.push({
       name: 'web_search',
       description: wsDesc || 'Search the web using Brave Search API.',
@@ -470,6 +526,83 @@ async function extractBuiltinTools() {
       source: 'builtin',
     });
     seen.add('web_search');
+  }
+
+  if (!seen.has('sessions_spawn')) {
+    const descBundle = bundles.find(bundle => bundle.src.includes('name: "sessions_spawn"'));
+    const description = descBundle
+      ? extractDescription(descBundle.src, descBundle.src.indexOf('name: "sessions_spawn"'))
+      : 'Spawn an isolated session or subagent run.';
+    tools.push({
+      name: 'sessions_spawn',
+      description,
+      parameters: JSON.parse(JSON.stringify(Type.Object({
+        task: Type.String(),
+        label: Type.Optional(Type.String()),
+        runtime: Type.Optional(Type.Union([
+          Type.Literal('subagent'),
+          Type.Literal('acp'),
+        ])),
+        agentId: Type.Optional(Type.String()),
+        resumeSessionId: Type.Optional(Type.String({ description: 'Resume an existing ACP session by ID.' })),
+        model: Type.Optional(Type.String()),
+        thinking: Type.Optional(Type.String()),
+        cwd: Type.Optional(Type.String()),
+        runTimeoutSeconds: Type.Optional(Type.Number({ minimum: 0 })),
+        timeoutSeconds: Type.Optional(Type.Number({ minimum: 0 })),
+        thread: Type.Optional(Type.Boolean()),
+        mode: Type.Optional(Type.Union([
+          Type.Literal('run'),
+          Type.Literal('session'),
+        ])),
+        cleanup: Type.Optional(Type.Union([
+          Type.Literal('delete'),
+          Type.Literal('keep'),
+        ])),
+        sandbox: Type.Optional(Type.Union([
+          Type.Literal('inherit'),
+          Type.Literal('require'),
+        ])),
+        streamTo: Type.Optional(Type.Literal('parent')),
+        attachments: Type.Optional(Type.Array(Type.Object({
+          name: Type.String(),
+          content: Type.String(),
+          encoding: Type.Optional(Type.Union([
+            Type.Literal('utf8'),
+            Type.Literal('base64'),
+          ])),
+          mimeType: Type.Optional(Type.String()),
+        }), { maxItems: 50 })),
+        attachAs: Type.Optional(Type.Object({
+          mountPath: Type.Optional(Type.String()),
+        })),
+      }))),
+      source: 'builtin',
+    });
+    seen.add('sessions_spawn');
+  }
+
+  if (!seen.has('subagents')) {
+    const descBundle = bundles.find(bundle => bundle.src.includes('name: "subagents"'));
+    const description = descBundle
+      ? extractDescription(descBundle.src, descBundle.src.indexOf('name: "subagents"'))
+      : 'List, kill, or steer spawned sub-agents for the current session.';
+    tools.push({
+      name: 'subagents',
+      description,
+      parameters: JSON.parse(JSON.stringify(Type.Object({
+        action: Type.Optional(Type.Union([
+          Type.Literal('list'),
+          Type.Literal('kill'),
+          Type.Literal('steer'),
+        ])),
+        target: Type.Optional(Type.String()),
+        message: Type.Optional(Type.String()),
+        recentMinutes: Type.Optional(Type.Number({ minimum: 1 })),
+      }))),
+      source: 'builtin',
+    });
+    seen.add('subagents');
   }
 
   // ── read / write / edit 来自 pi-coding-agent（bundle 里没有定义） ──
@@ -494,43 +627,6 @@ async function extractBuiltinTools() {
         seen.add(name);
       } catch { /* skip */ }
     }
-  }
-
-  // ── 补充：createXxxSchema 函数模式（如 web_search） ──
-  // 对于 parameters: createXxxSchema(...) 形式，直接调用函数提取
-  const fnSchemaRe = /\bname:\s*"([a-z][a-z0-9_]{1,50})"[^{]{0,200}?parameters:\s*(create[A-Za-z]+Schema)\s*\(/gs;
-  let fm;
-  while ((fm = fnSchemaRe.exec(src)) !== null) {
-    const toolName = fm[1];
-    const fnName   = fm[2];
-    if (seen.has(toolName)) continue;
-
-    // 找函数定义并 eval
-    const fnMarker = `function ${fnName}`;
-    const fnIdx = src.indexOf(fnMarker);
-    if (fnIdx === -1) continue;
-
-    let depth = 0, i = fnIdx;
-    while (i < src.length) {
-      if (src[i] === '{') depth++;
-      else if (src[i] === '}') { depth--; if (depth === 0) break; }
-      i++;
-    }
-    const fnBody = src.slice(fnIdx, i + 1);
-    const constCode = Object.entries(consts).map(([k, v]) => `const ${k} = ${JSON.stringify(v)};`).join('\n');
-    let schema;
-    try {
-      schema = new Function('Type', constCode + '\n' + fnBody + `\nreturn ${fnName}({});`)(Type);
-    } catch { continue; }
-
-    const description = extractDescription(src, fm.index);
-    seen.add(toolName);
-    tools.push({
-      name: toolName,
-      description,
-      parameters: JSON.parse(JSON.stringify(schema)),
-      source: 'builtin',
-    });
   }
 
   return tools;

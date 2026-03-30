@@ -378,12 +378,23 @@ python scripts/run_generation.py --refresh-tools --limit 1
 - `openclaw`
 - 常用开发/排障工具（`git`、`tmux`、`htop`、`tree`、`ssh` 等）
 
+默认会安装固定版本的 `openclaw@2026.3.24`。如果你担心新版本不兼容，可以继续用默认值；如果要切换版本，直接在构建时传 `OPENCLAW_VERSION` 即可。
+
 ### 本地构建 arm64 镜像
 
 适合 Apple Silicon 本机或同事的 macOS：
 
 ```bash
 docker buildx build --platform linux/arm64 -t openclaw-gen-data:arm64 --load .
+```
+
+指定 OpenClaw 版本示例：
+
+```bash
+docker buildx build \
+  --platform linux/arm64 \
+  --build-arg OPENCLAW_VERSION=2026.3.24 \
+  -t openclaw-gen-data:arm64 --load .
 ```
 
 ### 本地构建 amd64 镜像
@@ -403,6 +414,7 @@ docker buildx build \
   --build-arg https_proxy=http://10.120.6.220:7890 \
   --build-arg HTTP_PROXY=http://10.120.6.220:7890 \
   --build-arg HTTPS_PROXY=http://10.120.6.220:7890 \
+  --build-arg OPENCLAW_VERSION=2026.3.24 \
   -t openclaw-gen-data:amd64 --load .
 ```
 
@@ -465,6 +477,7 @@ docker run --rm -it \
 3. 点击 `Run workflow`
 4. 填写参数：
    - `image_tag`：例如 `v1.0.0`、`test-0327`
+  - `openclaw_version`：例如 `2026.3.24`，默认使用当前仓库固定值
    - `push_arm64`：是否推送 `arm64`
    - `push_amd64`：是否推送 `amd64`
 5. 运行完成后，从阿里云仓库拉对应标签即可

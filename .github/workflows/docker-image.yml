@@ -12,6 +12,10 @@ on:
         description: Image tag to push to Aliyun
         required: true
         default: manual
+      openclaw_version:
+        description: OpenClaw version to install in the image
+        required: true
+        default: 2026.3.24
       push_arm64:
         description: Push arm64 image
         required: true
@@ -45,6 +49,8 @@ jobs:
           platforms: linux/arm64
           push: false
           tags: local/openclaw-gen-data:pr-arm64
+          build-args: |
+            OPENCLAW_VERSION=2026.3.24
           cache-from: type=gha,scope=pr-arm64
           cache-to: type=gha,mode=max,scope=pr-arm64
 
@@ -56,6 +62,8 @@ jobs:
           platforms: linux/amd64
           push: false
           tags: local/openclaw-gen-data:pr-amd64
+          build-args: |
+            OPENCLAW_VERSION=2026.3.24
           cache-from: type=gha,scope=pr-amd64
           cache-to: type=gha,mode=max,scope=pr-amd64
 
@@ -101,6 +109,8 @@ jobs:
           sbom: false
           tags: ${{ steps.meta_aliyun_arm64.outputs.tags }}
           labels: ${{ steps.meta_aliyun_arm64.outputs.labels }}
+          build-args: |
+            OPENCLAW_VERSION=${{ inputs.openclaw_version }}
           cache-from: type=gha,scope=aliyun-arm64
           cache-to: type=gha,mode=max,scope=aliyun-arm64
 
@@ -143,5 +153,7 @@ jobs:
           sbom: false
           tags: ${{ steps.meta_aliyun.outputs.tags }}
           labels: ${{ steps.meta_aliyun.outputs.labels }}
+          build-args: |
+            OPENCLAW_VERSION=${{ inputs.openclaw_version }}
           cache-from: type=gha,scope=aliyun-amd64
           cache-to: type=gha,mode=max,scope=aliyun-amd64

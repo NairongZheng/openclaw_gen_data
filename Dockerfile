@@ -4,7 +4,8 @@ ARG TARGETARCH
 ARG NODE_VERSION=24
 ARG PYTHON_VERSION=3.12
 ARG CONDA_ENV_NAME=dev
-ARG OPENCLAW_INSTALL_URL=https://openclaw.ai/install.sh
+ARG OPENCLAW_VERSION=2026.3.24
+ARG OPENCLAW_NPM_PACKAGE=openclaw
 ARG MINICONDA_BASE_URL=https://repo.anaconda.com/miniconda
 ARG HTTP_PROXY
 ARG HTTPS_PROXY
@@ -85,9 +86,15 @@ RUN set -euxo pipefail \
     && rm -f /tmp/requirements.txt \
     && "$CONDA_DIR/bin/conda" clean -afy
 
-RUN export OPENCLAW_NO_PROMPT=1 OPENCLAW_NO_ONBOARD=1 \
-    && curl -fsSL "$OPENCLAW_INSTALL_URL" | bash \
-    && OPENCLAW_BIN="$(find "$NVM_DIR/versions/node" -path '*/bin/openclaw' -type f | sort | tail -n 1)" \
+RUN . "$NVM_DIR/nvm.sh" \
+        && nvm use default \
+        && if [[ -n "$OPENCLAW_VERSION" ]] && [[ "$OPENCLAW_VERSION" != "latest" ]]; then \
+                 OPENCLAW_PACKAGE_SPEC="${OPENCLAW_NPM_PACKAGE}@${OPENCLAW_VERSION}"; \
+             else \
+                 OPENCLAW_PACKAGE_SPEC="$OPENCLAW_NPM_PACKAGE"; \
+             fi \
+        && npm install -g "$OPENCLAW_PACKAGE_SPEC" \
+        && OPENCLAW_BIN="$(find "$NVM_DIR/versions/node" -path '*/bin/openclaw' -type f | sort | tail -n 1)" \
     && test -n "$OPENCLAW_BIN" \
     && test -x "$OPENCLAW_BIN" \
     && ln -sfn "$OPENCLAW_BIN" /usr/local/bin/openclaw \
