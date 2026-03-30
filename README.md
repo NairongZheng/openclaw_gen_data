@@ -37,7 +37,7 @@
 关键文件：
 
 - [scripts/run_generation.py](scripts/run_generation.py)：主流程，负责生成、归档、转换、resume
-- [scripts/init_agents.py](scripts/init_agents.py)：初始化 worker agents、配置 model/skills、生成初始 workspace 快照
+- [scripts/init_agents.py](scripts/init_agents.py)：初始化 worker agents、配置 model/skills/web-search、生成初始 workspace 快照
 - [src/openclaw_wrapper.py](src/openclaw_wrapper.py)：OpenClaw CLI 与 session 管理
 - [src/llm_client.py](src/llm_client.py)：生成下一轮 query
 - [src/converter.py](src/converter.py)：session 转 middle format
@@ -135,30 +135,26 @@ paths:
 
 ### OpenClaw 搜索配置（可选）
 
-如果使用 OpenClaw 内置 `web_search`，并且搜索 provider 选 `kimi`，需要在 `~/.openclaw/openclaw.json` 里配置，而不是在本项目的 [config/config.yaml](config/config.yaml) 里配置：
+现在推荐直接通过启动脚本 [scripts/start_generation_in_container.sh](scripts/start_generation_in_container.sh) 在 `init_agents` 完成后、gateway 启动前 patch `~/.openclaw/openclaw.json`。这样可以避开 `ensure_agents` 对配置的覆盖，尽量从根源上解决“search 配置刚写进去又被改掉”的问题。只有在你同时提供 `provider + apiKey + baseUrl` 这三个变量时，脚本才会写入对应配置；如果三者没有给全，就直接跳过，不改 OpenClaw 配置。
 
-```json
-{
-  "tools": {
-    "web": {
-      "search": {
-        "enabled": true,
-        "provider": "kimi",
-        "kimi": {
-          "apiKey": "your-kimi-key",
-          "baseUrl": "https://api.moonshot.cn/v1"
-        }
-      }
-    }
-  }
-}
+日常最常用的几项是：
+
+```bash
+export OPENCLAW_SEARCH_PROVIDER="kimi"
+export OPENCLAW_SEARCH_API_KEY="sk-xxx"
+export OPENCLAW_SEARCH_BASE_URL="https://api.moonshot.cn/v1"
 ```
 
 说明：
 
-- OpenClaw 当前内置的 Kimi 搜索默认地址是 `https://api.moonshot.ai/v1`
-- 如果你的 key 只能走中国站，需要显式覆盖为 `https://api.moonshot.cn/v1`
-- `baseUrl` 这里需要保留 `/v1`
+- 只有这 3 个变量都提供时，才会修改 OpenClaw 配置
+- 一旦触发，会自动写入：`tools.web.fetch.enabled = true`
+- 一旦触发，也会自动写入：`tools.web.search = { enabled: true, provider, [provider]: { apiKey, baseUrl } }`
+- 如果 3 个变量没有给全，就完全跳过，不改现有 OpenClaw 配置
+
+补充说明：
+
+- Kimi 如果走中国站，`baseUrl` 需要显式设成 `https://api.moonshot.cn/v1`
 
 ## 使用方式
 
@@ -422,7 +418,7 @@ docker run --rm -it \
   -e CONFIG_PATH=/tmp/config.yaml \
   -e OUTPUT_DIR=/tmp/output \
   -e INTENTS_FILE=/tmp/intents.jsonl \
-  -e CONCURRENT_NUM=10 \
+  -e CONCURRENT_NUM=3 \
   openclaw-gen-data:amd64 \
   /workspace/scripts/start_generation_in_container.sh
 ```
@@ -436,7 +432,7 @@ docker run --rm -it \
 | `OUTPUT_DIR` | **必须** | 宿主机持久化输出目录，容器内 `output/` 会软链到这里 |
 | `CONFIG_PATH` | 可选 | mnt 里 `config.yaml` 的路径，脚本会自动 cp 到 `/workspace/config/config.yaml` |
 | `INTENTS_FILE` | 可选 | 覆盖 `config.yaml` 里的 `paths.intents_file`，可指定任意 intents 文件 |
-| `CONCURRENT_NUM` | 可选 | 并发数，默认 `10` |
+| `CONCURRENT_NUM` | 可选 | 并发数，默认 `3` |
 
 
 > `openclaw.json` 使用镜像构建时自动初始化的配置，无需外部注入。

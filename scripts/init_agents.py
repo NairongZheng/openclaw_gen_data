@@ -142,26 +142,16 @@ def generate_all_agents_tools(
     Returns:
         按 agent 分组的工具字典: {agent_id: [tools...]}
     """
-    tools_by_agent = {}
-    failed_agents: List[str] = []
-
-    for agent_id in agent_ids:
-        try:
-            tools = generate_agent_tools(agent_id, project_root, timeout)
-            tools_by_agent[agent_id] = tools
-        except Exception as e:
-            logger.error(f"生成 agent {agent_id} 的工具列表失败: {e}")
-            # 失败时记录空列表，允许后续使用 session 元数据兜底
-            tools_by_agent[agent_id] = []
-            failed_agents.append(agent_id)
-
-    if failed_agents:
-        logger.warning(
-            "工具列表生成失败的 agents: %s",
-            ", ".join(failed_agents),
-        )
-        if len(failed_agents) == len(agent_ids):
-            raise RuntimeError("所有 agent 的工具列表生成都失败了，请先修复 tool-inspector 依赖或运行环境")
+    if not agent_ids:
+        tools_by_agent: Dict[str, List[Dict[str, Any]]] = {}
+    else:
+        source_agent_id = agent_ids[0]
+        logger.info("所有 worker tools 当前共用，使用 %s 提取一次后复用", source_agent_id)
+        shared_tools = generate_agent_tools(source_agent_id, project_root, timeout)
+        tools_by_agent = {
+            agent_id: list(shared_tools)
+            for agent_id in agent_ids
+        }
 
     # 保存到文件
     output_path = Path(output_file)
@@ -170,7 +160,7 @@ def generate_all_agents_tools(
     with open(output_path, 'w', encoding='utf-8') as f:
         json.dump(tools_by_agent, f, indent=2, ensure_ascii=False)
 
-    logger.info(f"已保存 {len(agent_ids)} 个 agent 的工具列表到 {output_file}")
+    logger.info("已复用同一份工具列表并保存到 %s（agents=%s）", output_file, len(agent_ids))
 
     return tools_by_agent
 

@@ -25,6 +25,17 @@ WORKER_TOOLS_ALLOW = [
 ]
 
 
+def _merge_dicts(base: Optional[Dict[str, Any]], updates: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """递归合并字典，updates 优先。"""
+    merged: Dict[str, Any] = dict(base or {})
+    for key, value in (updates or {}).items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _merge_dicts(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
 def get_openclaw_config_path(config_path: Optional[Path] = None) -> Path:
     """返回 OpenClaw 配置文件路径。"""
     return config_path or DEFAULT_OPENCLAW_CONFIG_PATH
@@ -304,6 +315,19 @@ def configure_global_provider(
     save_openclaw_config(config, config_path)
 
     logger.info(f"已配置全局 provider: {provider_name}")
+
+
+def apply_openclaw_config_patch(
+    patch: Dict[str, Any],
+    config_path: Optional[Path] = None,
+) -> None:
+    """将 patch 递归合并进 OpenClaw 配置。"""
+    if not isinstance(patch, dict):
+        raise ValueError("patch 必须是字典")
+
+    config = load_openclaw_config(config_path)
+    merged_config = _merge_dicts(config, patch)
+    save_openclaw_config(merged_config, config_path)
 
 
 def delete_worker_agents(

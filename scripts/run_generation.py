@@ -23,6 +23,7 @@ from src.intent_loader import load_intents
 from src.openclaw_wrapper import OpenClawWrapper, ensure_agents
 from src.llm_client import LLMClient
 from src.converter import DataConverter
+from src.runtime_config import apply_runtime_patch_from_env
 from src.runtime_recovery import (
     backup_openclaw_config_to_output,
     looks_like_config_corruption_error,
@@ -469,6 +470,9 @@ def main():
         len(ensure_result["created"]),
         len(ensure_result.get("deleted", [])),
     )
+
+    if (ensure_result["created"] or ensure_result.get("deleted")) and apply_runtime_patch_from_env():
+        logger.info("已在 run_generation.ensure_agents 后恢复 OpenClaw runtime config")
 
     # 注意：在 ensure_agents 完成后再备份 baseline，避免把异常状态保存进去。
     backup_openclaw_config_to_output(paths_config)
