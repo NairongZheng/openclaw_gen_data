@@ -65,6 +65,7 @@ def create_llm_client(config: Dict[str, Any]) -> LLMClient:
         retry_attempts=llm_config.get("retry_attempts", 3),
         retry_base_delay=llm_config.get("retry_base_delay", 1.0),
         retry_max_delay=llm_config.get("retry_max_delay", 8.0),
+        enable_thinking=llm_config.get("enable_thinking", True),
     )
 
 
@@ -283,7 +284,7 @@ def process_intent(
             response = openclaw.send_message(
                 query,
                 timeout=config["generation"]["timeout"],
-                thinking=config["openclaw"].get("thinking"),
+                thinking="low" if config["openclaw"].get("enable_thinking", True) else None,
             )
 
             if _shutdown_requested.is_set() or _runtime_recovery_requested.is_set():

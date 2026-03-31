@@ -265,7 +265,8 @@ def configure_global_provider(
     provider_api: str = "anthropic-messages",
     context_window: int = 200000,
     max_tokens: int = 200000,
-    config_path: Optional[Path] = None
+    config_path: Optional[Path] = None,
+    reasoning: bool = False,
 ) -> None:
     """配置全局 provider。
 
@@ -278,6 +279,7 @@ def configure_global_provider(
         context_window: 上下文窗口大小（默认 200000）
         max_tokens: 最大生成 token 数（默认 200000）
         config_path: 配置文件路径（可选，默认 ~/.openclaw/openclaw.json）
+        reasoning: 是否开启推理模式（需模型支持，默认 False）
     """
     config = load_openclaw_config(config_path)
 
@@ -297,7 +299,7 @@ def configure_global_provider(
                 "id": model_id,
                 "name": model_id,
                 "api": provider_api,
-                "reasoning": False,
+                "reasoning": reasoning,
                 "input": ["text"],
                 "cost": {
                     "input": 0,

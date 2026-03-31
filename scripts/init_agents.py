@@ -424,6 +424,7 @@ def init_agents(
     provider_api = openclaw_config.get("api", "anthropic-messages")
     context_window = openclaw_config.get("context_window", 200000)
     max_tokens = openclaw_config.get("max_tokens", 200000)
+    enable_thinking = openclaw_config.get("enable_thinking", True)
 
     if model_url and model_api_key and model:
         logger.info("配置全局 provider...")
@@ -434,7 +435,8 @@ def init_agents(
             model_id=model,
             provider_api=provider_api,
             context_window=context_window,
-            max_tokens=max_tokens
+            max_tokens=max_tokens,
+            reasoning=enable_thinking,
         )
         logger.info("✓ 已配置全局 provider")
 

@@ -24,6 +24,7 @@ class LLMClient:
         retry_attempts: int = 3,
         retry_base_delay: float = 1.0,
         retry_max_delay: float = 8.0,
+        enable_thinking: bool = True,
     ):
         """初始化 LLM 客户端
 
@@ -37,6 +38,7 @@ class LLMClient:
             retry_attempts: 最大重试次数（包含首次请求）
             retry_base_delay: 重试基础退避时间（秒）
             retry_max_delay: 重试最大等待时间（秒）
+            enable_thinking: 是否开启推理模式（默认 True）
         """
         client_kwargs = {"base_url": base_url, "api_key": api_key}
         if timeout is not None:
@@ -49,6 +51,7 @@ class LLMClient:
         self.retry_attempts = max(1, retry_attempts)
         self.retry_base_delay = max(0.0, retry_base_delay)
         self.retry_max_delay = max(self.retry_base_delay, retry_max_delay)
+        self.enable_thinking = enable_thinking
 
     def generate_next_query(
         self,
@@ -99,6 +102,7 @@ class LLMClient:
                     temperature=self.temperature,
                     max_tokens=self.max_tokens,
                     response_format={"type": "json_object"},
+                    extra_body={"enable_thinking": True} if self.enable_thinking else None,
                 )
 
                 content = response.choices[0].message.content

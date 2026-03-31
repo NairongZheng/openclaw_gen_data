@@ -4,7 +4,7 @@ openclaw:
   worker_prefix: "gendata-worker"
   workspace_root: "~/.openclaw/workspaces"
   num_workers: 3
-  thinking: "off"
+  enable_thinking: true            # 是否开启推理模式（true/false）
   worker_tools_allow:
     - "read"
     - "write"
@@ -44,6 +44,7 @@ llm:
   retry_attempts: 3
   retry_base_delay: 1.0
   retry_max_delay: 8.0
+  enable_thinking: true           # 是否开启推理模式（默认 true）
 
 # ============== 生成配置 ==============
 generation:
