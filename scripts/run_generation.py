@@ -69,6 +69,14 @@ def create_llm_client(config: Dict[str, Any]) -> LLMClient:
     )
 
 
+def resolve_openclaw_thinking_mode(config: Dict[str, Any]) -> str:
+    """解析 OpenClaw CLI 的 thinking 参数。"""
+    openclaw_config = config["openclaw"]
+    if not openclaw_config.get("enable_thinking", True):
+        return "off"
+    return openclaw_config.get("thinking_level", "high")
+
+
 def request_runtime_recovery(reason: str) -> None:
     """请求全局运行时恢复（停止当前批次，回滚配置后重跑）。"""
     global _runtime_recovery_reason, _runtime_recovery_requested_at
@@ -281,14 +289,10 @@ def process_intent(
 
             logger.info(f"[{agent_name}] Query: {query[:100]}...")
 
-            # 根据模型决定是否使用 thinking 参数
-            openclaw_config = config["openclaw"]
-            thinking_level = openclaw_config.get("thinking_level", "high") # 默认设置为high
-
             response = openclaw.send_message(
                 query,
                 timeout=config["generation"]["timeout"],
-                thinking=thinking_level,
+                thinking=resolve_openclaw_thinking_mode(config),
             )
 
             if _shutdown_requested.is_set() or _runtime_recovery_requested.is_set():
@@ -335,6 +339,8 @@ def process_intent(
             available_tool_entries=extract_available_tool_entries(archive_meta["session_info"]),
             skills=extract_skills(archive_meta["session_info"]),
             session_metadata=archive_meta["session_info"],
+            agent_name=agent_name,
+            workspace_root=config["openclaw"].get("workspace_root"),
         )
 
         openclaw.reset_main_session()

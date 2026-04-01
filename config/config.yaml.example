@@ -26,27 +26,21 @@ openclaw:
     - "tts"
   model_url: "xxx"
   model_api_key: "xxx"
-
-  # 支持的模型示例：
-  # - Claude: "claude-sonnet-4-6" 
-  # - DeepSeek: "deepseek-v3.2" 
-  # - Qwen: "qwen3.5-plus" 
-  # - GLM: "glm-5" 
-  # - OpenAI: "gpt-4o"
   model: "glm-5"
 
   # API 类型：
-  # - anthropic-messages: 用于 Claude 模型
-  # - openai-completions: 用于兼容 OpenAI API 的模型（DeepSeek、Qwen、GLM 等）
   api: "openai-completions"     # openai-completions / anthropic-messages
 
-  enable_thinking: true            # 是否开启推理模式（true/false，默认 true）
+  enable_thinking: true         # 是否开启 OpenClaw 推理模式（true/false）
+  # 注意：这里主要控制 session 原始轨迹里是否更容易出现 thinking/reasoning 内容。
+  # 即使设成 false，OpenClaw / 底层模型有时仍会在 session 原始消息里留下 type="thinking" 块。
+  # 这是 OpenClaw 对模型原始输出的归档行为，不代表你的配置没有生效。
 
-  # Thinking Level 配置 对支持的模型生效，如 Claude等）
+  # Thinking Level 配置：仅当 enable_thinking=true 时才会传给 OpenClaw CLI
   # 可选值：off | minimal | low | medium | high | xhigh | adaptive
   # - Claude 4.6 模型默认使用 adaptive
   # - Z.AI（glm） 只支持二进制（on/off），任何非 off 的值都映射为 low
-  thinking_level: "high" # 默认设置为high
+  thinking_level: "high"
   context_window: 360000
   max_tokens: 36000
 
@@ -65,16 +59,6 @@ llm:
   retry_attempts: 3
   retry_base_delay: 1.0
   retry_max_delay: 8.0
-
-  # Thinking 配置说明：
-  # - enable_thinking: 是否开启推理模式（默认 true）
-  # - 不同模型的 thinking 实现方式会自动识别：
-  #   * DeepSeek-R1: extra_body = {"thinking": {"type": "enabled"}}
-  #   * DeepSeek 其他: extra_body = {"enable_thinking": True}
-  #   * Qwen: extra_body = {"enable_thinking": True}
-  #   * GLM: extra_body = {"enable_thinking": True}
-  #   * Claude: 原生支持，无需 extra_body
-  #   * OpenAI o1/o3: 内置推理，无需额外参数
   enable_thinking: true
 
 # ============== 生成配置 ==============

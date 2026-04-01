@@ -496,7 +496,7 @@ def ensure_agents(
             configure_agent(
                 agent_id,
                 workspace=str(desired_workspace),
-                tools_allow=effective_tools_allow
+                tools_allow=effective_tools_allow,
             )
         logger.info(
             f"已完成配置（workspace + {len(effective_tools_allow)} 个工具）"
@@ -576,17 +576,21 @@ class OpenClawWrapper:
         self,
         message: str,
         timeout: int = 600,
-        thinking: Optional[str] = None,
+        thinking: str = "off",
     ) -> Dict[str, Any]:
         """发送消息到 OpenClaw。"""
         cmd = ["openclaw", "agent", "--agent", self.agent_name, "--message", message, "--json"]
-        if thinking:
-            cmd.extend(["--thinking", thinking])
+        cmd.extend(["--thinking", thinking])
 
         # 添加 --timeout 参数，覆盖 OpenClaw Gateway 的默认 600s 超时
         cmd.extend(["--timeout", str(timeout)])
 
-        logger.info(f"Sending message to agent {self.agent_name} (timeout={timeout}s)")
+        logger.info(
+            "Sending message to agent %s (timeout=%ss, thinking=%s)",
+            self.agent_name,
+            timeout,
+            thinking,
+        )
 
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)

@@ -465,7 +465,7 @@ def init_agents(
             configure_agent(
                 agent_id=agent_id,
                 model=model_config,
-                skills=agent_skills
+                skills=agent_skills,
             )
         logger.info(f"✓ 已配置所有 agents 的 model 和 {len(agent_skills)} 个 skills")
     else:

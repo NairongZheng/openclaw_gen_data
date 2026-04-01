@@ -4,6 +4,7 @@ import logging
 import random
 import time
 from typing import Dict, Any, List, Optional
+
 from openai import OpenAI
 
 logger = logging.getLogger(__name__)
@@ -19,41 +20,26 @@ def _get_thinking_extra_body(model: str, enable_thinking: bool) -> Optional[Dict
     Returns:
         extra_body 字典或 None
     """
-    if not enable_thinking:
-        return None
-
     model_lower = model.lower()
 
     # DeepSeek-R1 系列：使用 thinking.type 格式
     if "deepseek-r1" in model_lower:
-        return {"thinking": {"type": "enabled"}}
+        return {"thinking": {"type": "enabled" if enable_thinking else "disabled"}}
 
-    # DeepSeek 其他模型：使用 enable_thinking 参数
-    if "deepseek" in model_lower:
-        return {"enable_thinking": True}
-
-    # Qwen/通义千问：使用 enable_thinking
-    if "qwen" in model_lower:
-        return {"enable_thinking": True}
-
-    # GLM/智谱：使用 enable_thinking
-    if "glm" in model_lower:
-        return {"enable_thinking": True}
+    # DeepSeek / Qwen / GLM：使用 enable_thinking 参数
+    if "deepseek" in model_lower or "qwen" in model_lower or "glm" in model_lower:
+        return {"enable_thinking": enable_thinking}
 
     # Claude/Anthropic：不需要 extra_body，使用原生支持
     if "claude" in model_lower or "anthropic" in model_lower:
         return None
-
-    # OpenAI GPT-4o 等：支持 reasoning_effort 参数（部分模型）
-    if "gpt-4o" in model_lower or "gpt-4" in model_lower:
-        return {"enable_thinking": True}
 
     # OpenAI o1/o3 系列：内置推理，不需要额外参数
     if "o1" in model_lower or "o3" in model_lower:
         return None
 
     # 默认：尝试使用 enable_thinking
-    return {"enable_thinking": True}
+    return {"enable_thinking": enable_thinking}
 
 
 class LLMClient:
@@ -145,14 +131,24 @@ class LLMClient:
                 # 根据模型获取对应的 thinking 配置
                 extra_body = _get_thinking_extra_body(self.model, self.enable_thinking)
 
-                response = self.client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    temperature=self.temperature,
-                    max_tokens=self.max_tokens,
-                    response_format={"type": "json_object"},
-                    extra_body=extra_body,
+                request_kwargs = {
+                    "model": self.model,
+                    "messages": messages,
+                    "temperature": self.temperature,
+                    "max_tokens": self.max_tokens,
+                    "response_format": {"type": "json_object"},
+                }
+                if extra_body is not None:
+                    request_kwargs["extra_body"] = extra_body
+
+                logger.debug(
+                    "LLM request thinking=%s model=%s extra_body=%s",
+                    self.enable_thinking,
+                    self.model,
+                    extra_body,
                 )
+
+                response = self.client.chat.completions.create(**request_kwargs)
 
                 content = response.choices[0].message.content
                 if not content:
