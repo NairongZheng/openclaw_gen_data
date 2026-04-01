@@ -3,11 +3,57 @@ import json
 import logging
 import random
 import time
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from openai import OpenAI
-from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _get_thinking_extra_body(model: str, enable_thinking: bool) -> Optional[Dict[str, Any]]:
+    """根据模型名称获取 thinking 配置的 extra_body 参数
+
+    Args:
+        model: 模型名称
+        enable_thinking: 是否启用 thinking
+
+    Returns:
+        extra_body 字典或 None
+    """
+    if not enable_thinking:
+        return None
+
+    model_lower = model.lower()
+
+    # DeepSeek-R1 系列：使用 thinking.type 格式
+    if "deepseek-r1" in model_lower:
+        return {"thinking": {"type": "enabled"}}
+
+    # DeepSeek 其他模型：使用 enable_thinking 参数
+    if "deepseek" in model_lower:
+        return {"enable_thinking": True}
+
+    # Qwen/通义千问：使用 enable_thinking
+    if "qwen" in model_lower:
+        return {"enable_thinking": True}
+
+    # GLM/智谱：使用 enable_thinking
+    if "glm" in model_lower:
+        return {"enable_thinking": True}
+
+    # Claude/Anthropic：不需要 extra_body，使用原生支持
+    if "claude" in model_lower or "anthropic" in model_lower:
+        return None
+
+    # OpenAI GPT-4o 等：支持 reasoning_effort 参数（部分模型）
+    if "gpt-4o" in model_lower or "gpt-4" in model_lower:
+        return {"enable_thinking": True}
+
+    # OpenAI o1/o3 系列：内置推理，不需要额外参数
+    if "o1" in model_lower or "o3" in model_lower:
+        return None
+
+    # 默认：尝试使用 enable_thinking
+    return {"enable_thinking": True}
 
 
 class LLMClient:
@@ -96,13 +142,16 @@ class LLMClient:
 
         for attempt in range(1, self.retry_attempts + 1):
             try:
+                # 根据模型获取对应的 thinking 配置
+                extra_body = _get_thinking_extra_body(self.model, self.enable_thinking)
+
                 response = self.client.chat.completions.create(
                     model=self.model,
                     messages=messages,
                     temperature=self.temperature,
                     max_tokens=self.max_tokens,
                     response_format={"type": "json_object"},
-                    extra_body={"enable_thinking": True} if self.enable_thinking else None,
+                    extra_body=extra_body,
                 )
 
                 content = response.choices[0].message.content

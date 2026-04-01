@@ -266,7 +266,7 @@ def configure_global_provider(
     context_window: int = 200000,
     max_tokens: int = 200000,
     config_path: Optional[Path] = None,
-    reasoning: bool = False,
+    reasoning: bool = True,
 ) -> None:
     """配置全局 provider。
 
@@ -279,7 +279,7 @@ def configure_global_provider(
         context_window: 上下文窗口大小（默认 200000）
         max_tokens: 最大生成 token 数（默认 200000）
         config_path: 配置文件路径（可选，默认 ~/.openclaw/openclaw.json）
-        reasoning: 是否开启推理模式（需模型支持，默认 False）
+        reasoning: 是否开启推理模式（直接使用配置的 enable_thinking 值，默认 True）
     """
     config = load_openclaw_config(config_path)
 
@@ -316,7 +316,9 @@ def configure_global_provider(
     # 保存配置文件
     save_openclaw_config(config, config_path)
 
-    logger.info(f"已配置全局 provider: {provider_name}")
+    logger.info(
+        f"已配置全局 provider: {provider_name} (model={model_id}, reasoning={reasoning})"
+    )
 
 
 def apply_openclaw_config_patch(

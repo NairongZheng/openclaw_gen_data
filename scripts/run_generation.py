@@ -281,10 +281,14 @@ def process_intent(
 
             logger.info(f"[{agent_name}] Query: {query[:100]}...")
 
+            # 根据模型决定是否使用 thinking 参数
+            openclaw_config = config["openclaw"]
+            thinking_level = openclaw_config.get("thinking_level", "high") # 默认设置为high
+
             response = openclaw.send_message(
                 query,
                 timeout=config["generation"]["timeout"],
-                thinking="low" if config["openclaw"].get("enable_thinking", True) else None,
+                thinking=thinking_level,
             )
 
             if _shutdown_requested.is_set() or _runtime_recovery_requested.is_set():
