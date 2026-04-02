@@ -19,6 +19,10 @@ else:
 
 from src.openclaw_wrapper import ensure_agents, resolve_workspace_root
 from src.config import load_config
+from src.worker_snapshot import (
+    resolve_runtime_snapshot_root,
+    resolve_template_snapshot_root,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -357,11 +361,14 @@ def init_agents(
 
     # 如果强制重建，先删除旧的 workspace 快照
     if force_recreate:
-        snapshot_dir = project_root / "output" / "workspace_snapshots"
+        snapshot_dir = resolve_template_snapshot_root(paths_config)
         if snapshot_dir.exists():
-            logger.info("删除旧的 workspace 快照...")
+            logger.info("删除旧的 workspace 快照: %s", snapshot_dir)
             shutil.rmtree(snapshot_dir)
-            logger.info("✓ 已删除旧快照")
+        agent_snapshot_dir = resolve_runtime_snapshot_root(paths_config)
+        if agent_snapshot_dir.exists():
+            logger.info("删除旧的 worker runtime 快照: %s", agent_snapshot_dir)
+            shutil.rmtree(agent_snapshot_dir)
 
     result = ensure_agents(
         num_agents=num_agents,
@@ -392,7 +399,7 @@ def init_agents(
             modify_agent_md(agent_id, str(root_dir))
             remove_excluded_workspace_files(agent_id, str(root_dir))
 
-        snapshot_dir = project_root / "output" / "workspace_snapshots"
+        snapshot_dir = resolve_template_snapshot_root(paths_config)
         snapshot_dir.mkdir(parents=True, exist_ok=True)
 
         template_agent_id = new_agent_ids[0]

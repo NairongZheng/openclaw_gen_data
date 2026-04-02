@@ -9,7 +9,7 @@
 - 从 [data_examples/intents.jsonl](data_examples/intents.jsonl) 读取 user intent
 - 使用 user loop 持续与 OpenClaw 交互，直到任务完成或达到保险轮次
 - 保存完整 session 轨迹
-- 转换为训练中间格式，参考 [data_examples/middle_format_data.json](data_examples/middle_format_data.json)
+- 转换为训练中间格式，参考 [data_examples/safety_compliance_audit_middle_format.json](data_examples/safety_compliance_audit_middle_format.json)
 - 支持并发执行与断点续跑
 
 当前实现基于 OpenClaw CLI 和本地 session 文件，而不是直接依赖 HTTP API。
@@ -83,8 +83,9 @@ openclaw:
   worker_prefix: "gendata-worker"
   workspace_root: "~/.openclaw/workspaces"
   num_workers: 30
-  thinking: "off"
   api: "openai-completions"
+  enable_thinking: true
+  thinking_level: "high"
   worker_tools_allow:
     - "read"
     - "write"
@@ -104,6 +105,7 @@ llm:
 
 generation:
   max_turns: 20
+  intents_per_session: 1
   timeout: 600
 
 paths:
@@ -121,7 +123,8 @@ paths:
 - `openclaw.worker_prefix`：worker agent 前缀，例如 `gendata-worker-1`
 - `openclaw.workspace_root`：worker 独立 workspace 根目录，每个 agent 会使用 `<workspace_root>/<agent_id>`
 - `openclaw.num_workers`：默认并发 worker 数
-- `openclaw.thinking`：OpenClaw thinking 级别
+- `openclaw.enable_thinking`：是否开启 OpenClaw 推理模式
+- `openclaw.thinking_level`：OpenClaw thinking 级别，只有开启推理模式时才生效
 - `openclaw.api`：写入 OpenClaw provider 配置时使用的 API 类型
 - `openclaw.worker_tools_allow`：worker agent 使用的工具 allowlist；未配置时使用代码默认值
 - `llm.max_tokens`：user loop 调用 LLM 生成 query 的最大输出 token 数
@@ -130,8 +133,16 @@ paths:
 - `llm.retry_base_delay`：user model 重试的基础退避时间（秒）
 - `llm.retry_max_delay`：user model 重试等待的上限（秒）
 - `generation.max_turns`：保险轮次，避免死循环
+- `generation.intents_per_session`：每个 worker 连续处理多少个 intent 后，才结束当前 session 并统一写出本批 intent 的 session/middle_format 文件
 - `generation.timeout`：单次 OpenClaw 调用超时
 - `paths.tools_cache_file`：完整 tools catalog 缓存文件位置
+
+运行时常用覆盖项采用统一优先级：`ENV > CLI > config`
+
+- `CONFIG_PATH`：覆盖配置文件路径
+- `INTENTS_FILE`：覆盖 `paths.intents_file`
+- `CONCURRENT_NUM`：覆盖 `openclaw.num_workers`
+- `INTENTS_PER_SESSION`：覆盖 `generation.intents_per_session`
 
 ### OpenClaw 搜索配置（可选）
 
@@ -177,9 +188,9 @@ python scripts/init_agents.py --refresh-agent gendata-worker-1
 初始化脚本还会额外做这些事情：
 
 - 为新创建的 agent workspace 修改 `AGENTS.md`，补充“只在自己 workspace 工作”的约束
-- 为新创建的 agent 保存初始 workspace 快照到 [output/workspace_snapshots](output/workspace_snapshots)
+- 为新创建的 agent 保存初始 workspace 快照到 [output/worker_snapshots](output/worker_snapshots)
 - 后续每条 intent 开始前，worker 会先从快照恢复 workspace，避免上一次任务残留文件污染结果
-- 保存快照时会排除 `.git` 和 `BOOTSTRAP.md`
+- 保存运行时 workspace 快照时会排除 `.git`
 
 ### 2. 正式运行
 
@@ -187,6 +198,8 @@ python scripts/init_agents.py --refresh-agent gendata-worker-1
 python scripts/run_generation.py --concurrent 30
     # --concurrent：指定并发数
 ```
+
+按当前仓库默认约定，批量跑容器时更推荐直接用环境变量覆盖常改项；本机临时调试时再用 CLI 覆盖。
 
 只跑前 10 条 intent：
 
@@ -217,9 +230,9 @@ python scripts/run_generation.py --refresh-tools --limit 1
    - 调用 LLM 生成下一条 query
    - 调用 OpenClaw 执行一轮交互
    - 重复直到完成或达到 `max_turns`
-   - 归档 session 文件
-   - 转换 middle format
-   - 再次 reset session
+  - 若当前 session 还会继续复用，只保留内部快照，不立即写出最终产物
+  - 当前 session 到达批次上限或 worker 无后续任务时，再统一归档本批 intent 的 session 文件并转换 middle format
+  - 最后 reset session
 
 ## 输出说明
 
@@ -235,7 +248,7 @@ python scripts/run_generation.py --refresh-tools --limit 1
 
 转换后的数据保存在 [output/middle_format](output/middle_format)。
 
-每条 intent 对应一个 JSON 文件。
+每条 intent 对应一个 JSON 文件；当 `generation.intents_per_session > 1` 时，会在该 session 批次结束后统一写出这一批 intent 的文件。
 
 ### 进度文件
 
@@ -350,7 +363,7 @@ python scripts/run_generation.py --refresh-tools --limit 1
 
 - [docs/raw_design.txt](docs/raw_design.txt)：原始设计思路
 - [docs/plan.md](docs/plan.md)：历史开发计划
-- [data_examples/middle_format_data.json](data_examples/middle_format_data.json)：middle format 示例
+- [data_examples/safety_compliance_audit_middle_format.json](data_examples/safety_compliance_audit_middle_format.json)：middle format 示例
 
 ## 当前状态
 
@@ -445,9 +458,15 @@ docker run --rm -it \
 | `CONFIG_PATH` | 可选 | mnt 里 `config.yaml` 的路径，脚本会自动 cp 到 `/workspace/config/config.yaml` |
 | `INTENTS_FILE` | 可选 | 覆盖 `config.yaml` 里的 `paths.intents_file`，可指定任意 intents 文件 |
 | `CONCURRENT_NUM` | 可选 | 并发数，默认 `3` |
+| `INTENTS_PER_SESSION` | 可选 | 覆盖 `generation.intents_per_session` |
+| `OPENCLAW_SEARCH_PROVIDER` | 可选 | 搜索 provider；需与下面两个变量一起提供 |
+| `OPENCLAW_SEARCH_API_KEY` | 可选 | 搜索 provider 对应的 API Key |
+| `OPENCLAW_SEARCH_BASE_URL` | 可选 | 搜索 provider 对应的 Base URL |
 
 
 > `openclaw.json` 使用镜像构建时自动初始化的配置，无需外部注入。
+>
+> 运行时参数优先级为 `ENV > CLI > config`。
 >
 > 脚本内部使用 `conda run --no-capture-output`，日志会实时打印到容器标准输出。
 

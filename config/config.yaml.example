@@ -1,4 +1,6 @@
 
+# 运行时参数优先级：ENV > CLI > config
+
 # ============== OpenClaw 配置 ==============
 openclaw:
   worker_prefix: "gendata-worker"
@@ -49,10 +51,7 @@ openclaw:
 llm:
   base_url: "xxx"
   api_key: "xxx"
-
-
   model: "glm-5"
-
   temperature: 0.7
   max_tokens: 36000
   timeout: 120
@@ -65,6 +64,9 @@ llm:
 generation:
   # 最大交互轮次（保险丝，避免 User Loop 死循环）
   max_turns: 20
+
+  # 每个 worker 连续处理多少个 intent 后才重置一次 session / workspace
+  intents_per_session: 1
 
   # 单次 OpenClaw 交互超时（秒）
   timeout: 600

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from src.openclaw_wrapper import OpenClawWrapper, expected_agent_workspace, resolve_workspace_root
+from src.worker_snapshot import resolve_template_snapshot_root
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,7 @@ def resolve_project_root() -> Path:
 def get_workspace_snapshot_dir(project_root: Optional[Path] = None) -> Path:
     """返回 workspace 快照根目录。"""
     root = project_root or resolve_project_root()
-    return root / "output" / "workspace_snapshots"
+    return root / "output" / "worker_snapshots" / "template_workspace"
 
 
 def restore_workspace_snapshot(agent_name: str, config: Dict[str, Any]) -> None:
@@ -31,7 +32,8 @@ def restore_workspace_snapshot(agent_name: str, config: Dict[str, Any]) -> None:
     workspace_root = config["openclaw"].get("workspace_root")
     root_dir = resolve_workspace_root(workspace_root)
     workspace = expected_agent_workspace(agent_name, str(root_dir))
-    snapshot_root = get_workspace_snapshot_dir()
+    paths_config = config.get("paths", {})
+    snapshot_root = resolve_template_snapshot_root(paths_config)
     shared_snapshot_path = snapshot_root / SHARED_WORKSPACE_SNAPSHOT_NAME
     agent_snapshot_path = snapshot_root / agent_name
     snapshot_path = shared_snapshot_path if shared_snapshot_path.exists() else agent_snapshot_path

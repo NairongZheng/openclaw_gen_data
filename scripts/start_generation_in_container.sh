@@ -12,6 +12,7 @@ OUTPUT_DIR="${OUTPUT_DIR:?请设置 OUTPUT_DIR 环境变量，指向输出目录
 # CONFIG_PATH          : 项目 config.yaml 的路径（mnt 挂载进来后直接 cp）
 # INTENTS_FILE         : intents.jsonl 路径（mnt 挂载进来的路径），用于覆盖 config 里的 paths.intents_file
 # CONCURRENT_NUM       : 并发数，默认 3
+# INTENTS_PER_SESSION  : 每个 worker 连续处理多少个 intent 后再重置一次 session/workspace
 # OPENCLAW_SEARCH_PROVIDER : search provider
 # OPENCLAW_SEARCH_API_KEY  : 当前 provider 的 apiKey
 # OPENCLAW_SEARCH_BASE_URL : 当前 provider 的 baseUrl
@@ -20,12 +21,14 @@ OUTPUT_DIR="${OUTPUT_DIR:?请设置 OUTPUT_DIR 环境变量，指向输出目录
 CONFIG_PATH="${CONFIG_PATH:-}"
 INTENTS_FILE="${INTENTS_FILE:-}"
 CONCURRENT_NUM="${CONCURRENT_NUM:-3}"
+INTENTS_PER_SESSION="${INTENTS_PER_SESSION:-}"
 OPENCLAW_SEARCH_PROVIDER="${OPENCLAW_SEARCH_PROVIDER:-}"
 OPENCLAW_SEARCH_API_KEY="${OPENCLAW_SEARCH_API_KEY:-}"
 OPENCLAW_SEARCH_BASE_URL="${OPENCLAW_SEARCH_BASE_URL:-}"
 
 export OPENCLAW_SEARCH_PROVIDER OPENCLAW_SEARCH_API_KEY
 export OPENCLAW_SEARCH_BASE_URL
+export CONFIG_PATH INTENTS_FILE CONCURRENT_NUM INTENTS_PER_SESSION
 
 CONDA_DIR="${CONDA_DIR:-/opt/miniconda3}"
 CONDA_ENV_NAME="${CONDA_ENV_NAME:-dev}"
@@ -110,13 +113,7 @@ fi
 RUN_GENERATION_CMD=(
   "${CONDA_DIR}/bin/conda" run --no-capture-output -n "${CONDA_ENV_NAME}"
   python scripts/run_generation.py
-  --concurrent "${CONCURRENT_NUM}"
 )
-
-if [[ -n "${INTENTS_FILE}" ]]; then
-  RUN_GENERATION_CMD+=(--intents-file "${INTENTS_FILE}")
-  echo "[start] intents file override: ${INTENTS_FILE}"
-fi
 
 echo "[start] run_generation started"
 "${RUN_GENERATION_CMD[@]}"

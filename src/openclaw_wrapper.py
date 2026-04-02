@@ -628,8 +628,40 @@ class OpenClawWrapper:
         """获取 session 文件路径。"""
         return str(self.sessions_dir / f"{session_id}.jsonl")
 
-    def archive_current_session(self, destination_file: str) -> Dict[str, Any]:
-        """将当前 main session 的 jsonl 移动到项目输出目录。"""
+    def restore_main_session(self, snapshot_file: str, session_info: Dict[str, Any]) -> Dict[str, Any]:
+        """从快照文件恢复当前 worker 的 main session。"""
+        session_id = session_info.get("sessionId")
+        if not session_id:
+            raise RuntimeError(f"Session metadata missing sessionId for {self.agent_name}")
+
+        snapshot_path = Path(snapshot_file)
+        if not snapshot_path.exists():
+            raise FileNotFoundError(f"Session snapshot not found: {snapshot_path}")
+
+        destination_path = Path(self.get_session_file(session_id))
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(snapshot_path), str(destination_path))
+
+        store = self._load_session_store()
+        store[self.session_key] = session_info
+        self._write_session_store(store)
+
+        return {
+            "agent_name": self.agent_name,
+            "session_id": session_id,
+            "session_key": self.session_key,
+            "restored_from": str(snapshot_path),
+            "restored_to": str(destination_path),
+        }
+
+    def archive_current_session(self, destination_file: str, move_file: bool = True) -> Dict[str, Any]:
+        """将当前 main session 的 jsonl 归档到项目输出目录。
+
+        Args:
+            destination_file: 归档目标文件
+            move_file: 为 True 时移动源文件并结束当前归档阶段；
+                为 False 时仅复制快照，保留当前 session 继续复用。
+        """
         session_info = self.get_current_session_info()
         if not session_info:
             raise RuntimeError(f"No active session found for {self.agent_name}")
@@ -644,7 +676,10 @@ class OpenClawWrapper:
 
         destination_path = Path(destination_file)
         destination_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(source_path), str(destination_path))
+        if move_file:
+            shutil.move(str(source_path), str(destination_path))
+        else:
+            shutil.copy2(str(source_path), str(destination_path))
 
         return {
             "agent_name": self.agent_name,
@@ -653,4 +688,5 @@ class OpenClawWrapper:
             "session_info": session_info,
             "source_path": str(source_path),
             "archived_path": str(destination_path),
+            "archive_mode": "move" if move_file else "copy",
         }

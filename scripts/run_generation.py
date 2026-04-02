@@ -17,12 +17,23 @@ if '__file__' in globals():
 else:
     sys.path.insert(0, str(Path(os.getcwd())))
 
-from src.config import load_config
-from src.agent_runtime import cleanup_agents, restore_workspace_snapshot
+from src.config import load_config, resolve_config_path
+from src.agent_runtime import cleanup_agents, resolve_project_root, restore_workspace_snapshot
 from src.intent_loader import load_intents
 from src.openclaw_wrapper import OpenClawWrapper, ensure_agents
 from src.llm_client import LLMClient
 from src.converter import DataConverter
+from src.generation_support import (
+    ProgressTracker,
+    build_archived_session_path,
+    build_session_batch_metadata,
+    create_llm_client,
+    load_agent_tools,
+    materialize_intent_output,
+    resolve_intents_per_session,
+    resolve_openclaw_thinking_mode,
+    summarize_final_results,
+)
 from src.runtime_config import apply_runtime_patch_from_env
 from src.runtime_recovery import (
     backup_openclaw_config_to_output,
@@ -30,7 +41,14 @@ from src.runtime_recovery import (
     recover_openclaw_runtime_from_baseline,
     resolve_openclaw_runtime_paths,
 )
-from src.utils import ensure_dir, load_json, save_json, setup_logging
+from src.utils import ensure_dir, save_json, setup_logging
+from src.worker_snapshot import (
+    clear_worker_runtime_snapshot,
+    list_pending_snapshot_intent_ids,
+    resolve_worker_snapshot_root,
+    restore_worker_runtime_snapshot,
+    save_worker_runtime_snapshot,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,39 +61,6 @@ _runtime_recovery_requested = threading.Event()
 _runtime_recovery_reason_lock = threading.Lock()
 _runtime_recovery_reason: str = ""
 _runtime_recovery_requested_at: Optional[float] = None
-
-
-def resolve_project_root() -> Path:
-    """解析项目根目录。"""
-    if '__file__' in globals():
-        return Path(__file__).parent.parent
-    return Path(os.getcwd())
-
-
-def create_llm_client(config: Dict[str, Any]) -> LLMClient:
-    """根据配置创建 LLM 客户端。"""
-    llm_config = config["llm"]
-    return LLMClient(
-        base_url=llm_config["base_url"],
-        api_key=llm_config["api_key"],
-        model=llm_config["model"],
-        temperature=llm_config.get("temperature", 0.7),
-        max_tokens=llm_config.get("max_tokens"),
-        timeout=llm_config.get("timeout"),
-        retry_attempts=llm_config.get("retry_attempts", 3),
-        retry_base_delay=llm_config.get("retry_base_delay", 1.0),
-        retry_max_delay=llm_config.get("retry_max_delay", 8.0),
-        enable_thinking=llm_config.get("enable_thinking", True),
-    )
-
-
-def resolve_openclaw_thinking_mode(config: Dict[str, Any]) -> str:
-    """解析 OpenClaw CLI 的 thinking 参数。"""
-    openclaw_config = config["openclaw"]
-    if not openclaw_config.get("enable_thinking", True):
-        return "off"
-    return openclaw_config.get("thinking_level", "high")
-
 
 def request_runtime_recovery(reason: str) -> None:
     """请求全局运行时恢复（停止当前批次，回滚配置后重跑）。"""
@@ -96,26 +81,6 @@ def consume_runtime_recovery_state() -> tuple[str, Optional[float]]:
         _runtime_recovery_reason = ""
         _runtime_recovery_requested_at = None
     return reason, requested_at
-
-
-def summarize_final_results(results: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """按 intent 聚合结果，保留每个 intent 的最终状态。"""
-    latest_results_by_intent: Dict[str, Dict[str, Any]] = {}
-    for result in results:
-        intent_id = str(result.get("intent_id", "unknown"))
-        latest_results_by_intent[intent_id] = result
-
-    final_results = list(latest_results_by_intent.values())
-    success = sum(1 for result in final_results if result.get("status") == "success")
-    failed = sum(1 for result in final_results if result.get("status") == "failed")
-    return {
-        "total": len(final_results),
-        "success": success,
-        "failed": failed,
-        "results": final_results,
-        "attempt_total": len(results),
-        "attempt_results": results,
-    }
 
 
 def signal_handler(signum, frame):
@@ -139,81 +104,6 @@ def signal_handler(signum, frame):
     os._exit(0)
 
 
-class ProgressTracker:
-    """线程安全的进度记录器。"""
-
-    def __init__(self, progress_file: str):
-        self.progress_file = Path(progress_file)
-        self.lock = threading.Lock()
-        if self.progress_file.exists():
-            self.data = load_json(str(self.progress_file))
-        else:
-            self.data = {"items": {}, "summary": {}}
-
-    def is_success(self, intent_id: str) -> bool:
-        item = self.data.get("items", {}).get(intent_id)
-        return bool(item and item.get("status") == "success")
-
-    def record(self, result: Dict[str, Any]) -> None:
-        intent_id = str(result["intent_id"])
-        with self.lock:
-            self.data.setdefault("items", {})[intent_id] = result
-            total = len(self.data["items"])
-            success = sum(1 for item in self.data["items"].values() if item.get("status") == "success")
-            failed = sum(1 for item in self.data["items"].values() if item.get("status") == "failed")
-            self.data["summary"] = {
-                "total_recorded": total,
-                "success": success,
-                "failed": failed,
-            }
-            save_json(self.data, str(self.progress_file))
-
-
-def load_agent_tools(cache_file: str, agent_id: str) -> List[Dict[str, Any]]:
-    """从缓存文件加载特定 agent 的工具列表。
-
-    Args:
-        cache_file: 缓存文件路径
-        agent_id: agent 名称
-
-    Returns:
-        工具列表（OpenAI format），如果不存在则返回空列表
-    """
-    cache_path = Path(cache_file)
-    if not cache_path.exists():
-        logger.warning(f"工具缓存文件不存在: {cache_file}")
-        return []
-
-    try:
-        data = load_json(str(cache_path))
-
-        # 新格式：{agent_id: [tools...]}
-        if isinstance(data, dict) and agent_id in data:
-            tools = data[agent_id]
-            logger.info(f"已加载 agent {agent_id} 的工具列表，共 {len(tools)} 个工具")
-            return tools
-        else:
-            logger.warning(f"未找到 agent {agent_id} 的工具列表")
-            return []
-    except Exception as e:
-        logger.error(f"加载 agent {agent_id} 的工具列表失败: {e}")
-        return []
-
-
-def extract_skills(session_info: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """从 sessions.json 快照中提取 skills。"""
-    skills_snapshot = (session_info or {}).get("skillsSnapshot", {})
-    resolved_skills = skills_snapshot.get("resolvedSkills")
-    if resolved_skills:
-        return resolved_skills
-    return skills_snapshot.get("skills", [])
-
-
-def extract_available_tool_entries(session_info: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """从 session 元数据中提取当前 agent 可用工具列表。"""
-    return (session_info or {}).get("systemPromptReport", {}).get("tools", {}).get("entries", [])
-
-
 def _build_interrupted_result(
     intent_id: Any,
     agent_name: str,
@@ -232,15 +122,33 @@ def _build_interrupted_result(
     }
 
 
+def log_runtime_config_summary(args: argparse.Namespace, config: Dict[str, Any], config_path: str) -> None:
+    """统一打印本次运行生效的关键配置。"""
+    paths_config = config["paths"]
+    generation_config = config.get("generation", {})
+    openclaw_config = config.get("openclaw", {})
+
+    logger.info("本次运行配置摘要：")
+    logger.info("  config_path=%s", config_path)
+    logger.info("  intents_file=%s", paths_config.get("intents_file"))
+    logger.info("  output_dir=%s", paths_config.get("output_dir"))
+    logger.info("  sessions_dir=%s", paths_config.get("sessions_dir"))
+    logger.info("  middle_format_dir=%s", paths_config.get("middle_format_dir"))
+    logger.info("  num_workers=%s", openclaw_config.get("num_workers"))
+    logger.info("  worker_prefix=%s", openclaw_config.get("worker_prefix", "gendata-worker"))
+    logger.info("  intents_per_session=%s", generation_config.get("intents_per_session"))
+    logger.info("  max_turns=%s", generation_config.get("max_turns"))
+    logger.info("  timeout=%s", generation_config.get("timeout"))
+    logger.info("  refresh_tools=%s", args.refresh_tools)
+    logger.info("  limit=%s", args.limit if args.limit is not None else "all")
 
 
 def process_intent(
     intent_data: Dict[str, Any],
     agent_name: str,
     config: Dict[str, Any],
-    tools_catalog: List[Dict[str, Any]],
     llm: LLMClient,
-    converter: DataConverter,
+    start_new_session: bool,
 ) -> Dict[str, Any]:
     """处理单个 intent。"""
     intent_id = intent_data.get("id", "unknown")
@@ -248,10 +156,9 @@ def process_intent(
 
     openclaw = OpenClawWrapper(agent_name)
     try:
-        # 在 session 开始前恢复 workspace 快照
-        restore_workspace_snapshot(agent_name, config)
-
-        openclaw.reset_main_session()
+        if start_new_session:
+            restore_workspace_snapshot(agent_name, config)
+            openclaw.reset_main_session()
 
         conversation_history = []
         max_turns = config["generation"].get("max_turns", 20)
@@ -325,34 +232,15 @@ def process_intent(
         if not session_info:
             raise RuntimeError(f"[{agent_name}] 未找到 session 信息，无法归档")
 
-        paths_config = config["paths"]
-        sessions_dir = Path(paths_config["sessions_dir"])
-        archived_session_file = sessions_dir / f"intent_{intent_id}__{agent_name}__{session_info['sessionId']}.jsonl"
-        archive_meta = openclaw.archive_current_session(str(archived_session_file))
-
-        output_file = Path(paths_config["middle_format_dir"]) / f"intent_{intent_id}.json"
-        converter.convert_session_to_middle_format(
-            session_file=str(archived_session_file),
-            intent_data=intent_data,
-            output_file=str(output_file),
-            tools_catalog=tools_catalog,
-            available_tool_entries=extract_available_tool_entries(archive_meta["session_info"]),
-            skills=extract_skills(archive_meta["session_info"]),
-            session_metadata=archive_meta["session_info"],
-            agent_name=agent_name,
-            workspace_root=config["openclaw"].get("workspace_root"),
-        )
-
-        openclaw.reset_main_session()
-
         logger.info(f"[{agent_name}] ✓ Intent {intent_id} 处理完成")
         return {
             "intent_id": str(intent_id),
             "status": "success",
             "agent_name": agent_name,
-            "output_file": str(output_file),
-            "session_file": str(archived_session_file),
-            "session_id": archive_meta["session_id"],
+            "intent_data": intent_data,
+            "session_info": session_info,
+            "started_new_session": start_new_session,
+            "finalized_session_after": False,
             "completed": completed,
             "completion_reason": completion_reason,
             "turns": len(conversation_history) // 2,
@@ -396,12 +284,28 @@ def worker_loop(
     worker_tools = load_agent_tools(tools_cache_file, agent_name)
     llm = create_llm_client(config)
     converter = DataConverter()
+    openclaw = OpenClawWrapper(agent_name)
 
     if not worker_tools:
         logger.warning(f"Worker {agent_name} 未找到工具缓存，使用空列表（将退回 session 元数据）")
         worker_tools = []
 
     results: List[Dict[str, Any]] = []
+    intents_per_session = resolve_intents_per_session(config)
+    intents_in_current_session = 0
+    pending_session_results: List[Dict[str, Any]] = []
+
+    try:
+        restored_snapshot = restore_worker_runtime_snapshot(agent_name, config, openclaw)
+    except Exception as exc:
+        logger.warning("[%s] 恢复 worker snapshot 失败，回退为全新 session: %s", agent_name, exc)
+        clear_worker_runtime_snapshot(agent_name, config)
+        restored_snapshot = None
+
+    if restored_snapshot:
+        pending_session_results = list(restored_snapshot.get("pending_results", []))
+        intents_in_current_session = int(restored_snapshot.get("intents_in_current_session", 0))
+
     while True:
         if _shutdown_requested.is_set() or _runtime_recovery_requested.is_set():
             break
@@ -411,7 +315,109 @@ def worker_loop(
         except queue.Empty:
             break
 
-        result = process_intent(intent_data, agent_name, config, worker_tools, llm, converter)
+        start_new_session = intents_in_current_session == 0
+        finalize_session_after = intents_in_current_session + 1 >= intents_per_session
+
+        result = process_intent(
+            intent_data,
+            agent_name,
+            config,
+            llm,
+            start_new_session=start_new_session,
+        )
+
+        if result.get("status") == "success":
+            intents_in_current_session += 1
+            should_finalize_session = finalize_session_after or task_queue.empty()
+
+            if should_finalize_session:
+                session_results = [*pending_session_results, result]
+                session_batch_metadata = build_session_batch_metadata(session_results, result["intent_id"])
+                final_session_file = build_archived_session_path(
+                    config["paths"],
+                    result["intent_id"],
+                    agent_name,
+                    result["session_info"]["sessionId"],
+                )
+                archive_meta = openclaw.archive_current_session(str(final_session_file), move_file=True)
+
+                for pending_result in pending_session_results:
+                    pending_result.update(
+                        {
+                            "session_id": archive_meta.get("session_id"),
+                            "session_archive_mode": "final-intent-only",
+                            "materialized_output": False,
+                            "finalized_session_after": False,
+                            "session_finalized_by_intent_id": result["intent_id"],
+                        }
+                    )
+                    progress.record(pending_result)
+                    results.append(pending_result)
+
+                result["finalized_session_after"] = True
+                result["session_batch_metadata"] = session_batch_metadata
+                finalized_result = materialize_intent_output(
+                    result,
+                    final_session_file,
+                    config,
+                    worker_tools,
+                    converter,
+                    agent_name,
+                    session_archive_mode=archive_meta.get("archive_mode", "move"),
+                )
+                finalized_result["materialized_output"] = True
+                finalized_result["session_member_count"] = len(pending_session_results) + 1
+
+                try:
+                    openclaw.reset_main_session()
+                except Exception as reset_error:
+                    logger.warning(f"[{agent_name}] finalize 后 reset 失败: {reset_error}")
+
+                progress.record(finalized_result)
+                results.append(finalized_result)
+
+                clear_worker_runtime_snapshot(agent_name, config)
+                pending_session_results = []
+                intents_in_current_session = 0
+            else:
+                pending_session_results.append(result)
+                try:
+                    save_worker_runtime_snapshot(
+                        agent_name,
+                        config,
+                        openclaw,
+                        pending_session_results,
+                        intents_in_current_session,
+                    )
+                except Exception as exc:
+                    logger.warning("[%s] 保存 worker snapshot 失败，将无法续跑当前 pending session: %s", agent_name, exc)
+        else:
+            if pending_session_results:
+                logger.warning(
+                    "[%s] 当前 session 中途失败，失败 intent 记为 failed；恢复最近成功快照并继续后续 intents，pending=%s",
+                    agent_name,
+                    len(pending_session_results),
+                )
+                try:
+                    restored_snapshot = restore_worker_runtime_snapshot(agent_name, config, openclaw)
+                except Exception as exc:
+                    logger.warning("[%s] 恢复 worker snapshot 失败，pending session 将被清空: %s", agent_name, exc)
+                    clear_worker_runtime_snapshot(agent_name, config)
+                    restored_snapshot = None
+                if restored_snapshot:
+                    pending_session_results = list(restored_snapshot.get("pending_results", []))
+                    intents_in_current_session = int(restored_snapshot.get("intents_in_current_session", 0))
+                else:
+                    pending_session_results = []
+                    intents_in_current_session = 0
+            else:
+                logger.warning(
+                    "[%s] intent=%s 失败且无 pending session，直接记 failed",
+                    agent_name,
+                    intent_data.get("id"),
+                )
+                clear_worker_runtime_snapshot(agent_name, config)
+                intents_in_current_session = 0
 
         # 运行时全局恢复：若失败像是 openclaw.json 被污染，通知主线程停止当前批次并重跑
         if result.get("status") == "failed" and not result.get("recovery_interrupted"):
@@ -427,12 +433,73 @@ def worker_loop(
                 request_runtime_recovery(error_message)
                 result["triggered_global_recovery"] = True
 
-        progress.record(result)
-        results.append(result)
+        if result.get("status") != "success":
+            progress.record(result)
+            results.append(result)
         task_queue.task_done()
 
         if _runtime_recovery_requested.is_set():
             break
+
+    if pending_session_results:
+        if not _shutdown_requested.is_set() and not _runtime_recovery_requested.is_set() and task_queue.empty():
+            logger.info("[%s] 无更多待处理 intent，收口当前 pending session（count=%s）", agent_name, len(pending_session_results))
+
+            final_pending_result = pending_session_results[-1]
+            previous_pending_results = pending_session_results[:-1]
+            session_batch_metadata = build_session_batch_metadata(pending_session_results, final_pending_result["intent_id"])
+            final_session_file = build_archived_session_path(
+                config["paths"],
+                final_pending_result["intent_id"],
+                agent_name,
+                final_pending_result["session_info"]["sessionId"],
+            )
+            archive_meta = openclaw.archive_current_session(str(final_session_file), move_file=True)
+
+            for pending_result in previous_pending_results:
+                pending_result.update(
+                    {
+                        "session_id": archive_meta.get("session_id"),
+                        "session_archive_mode": "final-intent-only",
+                        "materialized_output": False,
+                        "finalized_session_after": False,
+                        "session_finalized_by_intent_id": final_pending_result["intent_id"],
+                    }
+                )
+                progress.record(pending_result)
+                results.append(pending_result)
+
+            final_pending_result["finalized_session_after"] = True
+            final_pending_result["session_batch_metadata"] = session_batch_metadata
+            finalized_result = materialize_intent_output(
+                final_pending_result,
+                final_session_file,
+                config,
+                worker_tools,
+                converter,
+                agent_name,
+                session_archive_mode=archive_meta.get("archive_mode", "move"),
+            )
+            finalized_result["materialized_output"] = True
+            finalized_result["session_member_count"] = len(pending_session_results)
+            progress.record(finalized_result)
+            results.append(finalized_result)
+
+            clear_worker_runtime_snapshot(agent_name, config)
+            try:
+                openclaw.reset_main_session()
+            except Exception as reset_error:
+                logger.warning(f"[{agent_name}] worker 收尾 finalize 后 reset 失败: {reset_error}")
+        else:
+            logger.warning(
+                "[%s] worker 结束时仍有 %s 个未完成 session 收口的 intents；已保留 worker snapshot，后续可续跑",
+                agent_name,
+                len(pending_session_results),
+            )
+            try:
+                openclaw.reset_main_session()
+            except Exception as reset_error:
+                logger.warning(f"[{agent_name}] worker 收尾 reset 失败: {reset_error}")
 
     return results
 
@@ -441,31 +508,37 @@ def main():
     global _active_agents, _active_config, _executor
 
     parser = argparse.ArgumentParser(description="OpenClaw 数据生成")
-    parser.add_argument("--config", default="config/config.yaml", help="配置文件")
+    parser.add_argument("--config", help="配置文件")
     parser.add_argument("--intents-file", help="覆盖配置中的 intents 文件路径")
     parser.add_argument("--limit", type=int, help="限制处理数量")
     parser.add_argument("--concurrent", type=int, help="并发数")
+    parser.add_argument("--intents-per-session", type=int, help="每个 worker 连续处理多少个 intent 后再重置 session")
     parser.add_argument("--refresh-tools", action="store_true", help="启动前强制刷新完整 tools catalog")
     args = parser.parse_args()
-
-    config = load_config(args.config)
-    paths_config = config["paths"]
-    _active_config = config  # 设置全局配置
 
     # 注册信号处理器
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
+    config_path = resolve_config_path(args.config)
+    config = load_config(args.config, cli_args=args)
+    paths_config = config["paths"]
+    _active_config = config  # 设置全局配置
+
     setup_logging(paths_config["logs_dir"])
     ensure_dir(paths_config["output_dir"])
     ensure_dir(paths_config["sessions_dir"])
     ensure_dir(paths_config["middle_format_dir"])
+    ensure_dir(str(resolve_worker_snapshot_root(paths_config)))
 
     logger.info("=" * 60)
     logger.info("OpenClaw 数据生成开始")
     logger.info("=" * 60)
 
-    num_workers = args.concurrent or config["openclaw"]["num_workers"]
+    log_runtime_config_summary(args, config, config_path)
+
+    num_workers = int(config["openclaw"]["num_workers"])
+    intents_per_session = resolve_intents_per_session(config)
     worker_prefix = config["openclaw"].get("worker_prefix", "gendata-worker")
     workspace_root = config["openclaw"].get("workspace_root")
     ensure_result = ensure_agents(
@@ -503,7 +576,7 @@ def main():
             logger.error(f"刷新工具列表失败: {e}")
             # 继续执行，使用现有缓存或退回 session 元数据
 
-    intents_file = args.intents_file or paths_config["intents_file"]
+    intents_file = paths_config["intents_file"]
     logger.info(f"使用 intents 文件: {intents_file}")
     intents = load_intents(intents_file)
     logger.info(f"加载 {len(intents)} 个 intents")
@@ -516,21 +589,26 @@ def main():
     global_restart_count = 0
     all_results: List[Dict[str, Any]] = []
 
-    logger.info(f"并发数: {num_workers}")
-
     # 设置活跃的 agent 列表（用于 Ctrl+C 清理）
     _active_agents = [f"{worker_prefix}-{i+1}" for i in range(num_workers)]
 
     while True:
-        pending_intents = [intent for intent in intents if not progress.is_success(str(intent.get("id", "unknown")))]
+        snapshot_pending_intent_ids = list_pending_snapshot_intent_ids(paths_config)
+        pending_intents = [
+            intent
+            for intent in intents
+            if not progress.is_success(str(intent.get("id", "unknown")))
+            and str(intent.get("id", "unknown")) not in snapshot_pending_intent_ids
+        ]
 
-        if not pending_intents:
+        if not pending_intents and not snapshot_pending_intent_ids:
             logger.info("没有待处理的 intents，当前任务已全部完成")
             break
 
         logger.info(
-            "开始一轮 generation：待处理 %s，已触发自动恢复 %s/%s 次",
+            "开始一轮 generation：待处理 %s，snapshot 挂起 %s，已触发自动恢复 %s/%s 次",
             len(pending_intents),
+            len(snapshot_pending_intent_ids),
             global_restart_count,
             max_global_restarts,
         )

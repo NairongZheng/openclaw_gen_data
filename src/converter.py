@@ -55,14 +55,28 @@ class DataConverter:
             raise
 
         openai_messages = self._extract_messages_openai_format(messages)
-        system_prompt = self._build_system_prompt(agent_name, workspace_root)
+        system_prompt = self._build_system_prompt(agent_name, workspace_root, skills or [])
         enable_thinking = any(msg.get("reasoning_content") for msg in openai_messages)
+        session_metadata = session_metadata or {}
+        batch_metadata = session_metadata.get("batch", {})
+        source_intent_ids = batch_metadata.get("intent_ids") or [str(intent_data.get("id"))]
+        source_intent_count = int(batch_metadata.get("intent_count", len(source_intent_ids)))
+        source_intents = batch_metadata.get("intent_records") or [
+            {
+                "intent_id": str(intent_data.get("id")),
+                "natural_language_intent": intent_data.get("natural_language_intent"),
+            }
+        ]
+        session_finalized_by_intent_id = batch_metadata.get("finalized_by_intent_id", str(intent_data.get("id")))
 
         # 构建符合规范的 middle format
         middle_format = {
             "status": "completed",
             "session_id": Path(session_file).stem,
-            "intent": intent_data.get("natural_language_intent"),
+            "source_intent_count": source_intent_count,
+            "source_intent_ids": source_intent_ids,
+            "source_intents": source_intents,
+            "session_finalized_by_intent_id": session_finalized_by_intent_id,
             "total_steps": self._count_tool_calls(messages),
             "enable_thinking": enable_thinking,
             "messages": self._prepend_system_message(openai_messages, system_prompt),
@@ -72,7 +86,7 @@ class DataConverter:
             "intent_id": intent_data.get("id"),
             "metadata": {
                 **intent_data.get("metadata", {}),
-                "session": session_metadata or {},
+                "session": session_metadata,
             },
         }
 
@@ -162,7 +176,48 @@ class DataConverter:
                     reasoning_parts.append(reasoning_text)
         return "\n\n".join(reasoning_parts).strip()
 
-    def _build_system_prompt(self, agent_name: Optional[str], workspace_root: Optional[str]) -> str:
+    def _get_skill_field(self, skill: Dict[str, Any], *keys: str) -> str:
+        for key in keys:
+            value = skill.get(key)
+            if value is not None:
+                return str(value)
+        return ""
+
+    def _render_skills_section(self, skills: List[Dict[str, Any]]) -> List[str]:
+        if not skills:
+            return []
+
+        sections = [
+            "## Skills (mandatory)",
+            "Before replying: scan <available_skills> <description> and <location> entries.",
+            "- If exactly one skill clearly applies: follow it.",
+            "- If multiple could apply: choose the most specific one.",
+            "- If none clearly apply: do not use any skill-specific instruction.",
+            "The following skills provide specialized instructions for specific tasks.",
+            "",
+            "<available_skills>",
+        ]
+
+        for skill in skills:
+            sections.extend(
+                [
+                    "  <skill>",
+                    f"    <name>{self._get_skill_field(skill, 'name')}</name>",
+                    f"    <description>{self._get_skill_field(skill, 'description')}</description>",
+                    f"    <location>{self._get_skill_field(skill, 'filePath', 'path')}</location>",
+                    "  </skill>",
+                ]
+            )
+
+        sections.append("</available_skills>")
+        return sections
+
+    def _build_system_prompt(
+        self,
+        agent_name: Optional[str],
+        workspace_root: Optional[str],
+        skills: List[Dict[str, Any]],
+    ) -> str:
         """基于 agent workspace 文件生成 system prompt。"""
         if not agent_name:
             return ""
@@ -189,8 +244,13 @@ class DataConverter:
             "- openclaw gateway restart",
             "If unsure, ask the user to run `openclaw help` (or `openclaw gateway --help`) and paste the output.",
             "",
-            "<<<<<这里是 skills >>>>>",
-            "",
+        ]
+
+        skills_section = self._render_skills_section(skills)
+        if skills_section:
+            sections.extend(["", *skills_section, ""])
+
+        sections.extend([
             "## Documentation",
             "Mirror: https://docs.openclaw.ai",
             "Source: https://github.com/openclaw/openclaw",
@@ -245,7 +305,7 @@ class DataConverter:
             "",
             "# Project Context",
             "The following project context files have been loaded:",
-        ]
+        ])
 
         sections.extend(self._collect_workspace_context_sections(workspace_dir, shanghai_now))
         sections.extend([
