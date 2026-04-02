@@ -127,19 +127,19 @@ def log_runtime_config_summary(args: argparse.Namespace, config: Dict[str, Any],
     paths_config = config["paths"]
     generation_config = config.get("generation", {})
     openclaw_config = config.get("openclaw", {})
+    llm_config = config.get("llm", {})
 
     logger.info("本次运行配置摘要：")
-    logger.info("  config_path=%s", config_path)
-    logger.info("  intents_file=%s", paths_config.get("intents_file"))
-    logger.info("  output_dir=%s", paths_config.get("output_dir"))
-    logger.info("  sessions_dir=%s", paths_config.get("sessions_dir"))
-    logger.info("  middle_format_dir=%s", paths_config.get("middle_format_dir"))
     logger.info("  num_workers=%s", openclaw_config.get("num_workers"))
-    logger.info("  worker_prefix=%s", openclaw_config.get("worker_prefix", "gendata-worker"))
+    logger.info("  openclaw_model_url=%s", openclaw_config.get("model_url"))
+    logger.info("  openclaw_model=%s", openclaw_config.get("model"))
+    logger.info("  openclaw_enable_thinking=%s", openclaw_config.get("enable_thinking"))
+    logger.info("  openclaw_thinking_level=%s", openclaw_config.get("thinking_level"))
+    logger.info("  llm_base_url=%s", llm_config.get("base_url"))
+    logger.info("  llm_model=%s", llm_config.get("model"))
+    logger.info("  output_dir=%s", paths_config.get("output_dir"))
+    logger.info("  intents_file=%s", paths_config.get("intents_file"))
     logger.info("  intents_per_session=%s", generation_config.get("intents_per_session"))
-    logger.info("  max_turns=%s", generation_config.get("max_turns"))
-    logger.info("  timeout=%s", generation_config.get("timeout"))
-    logger.info("  refresh_tools=%s", args.refresh_tools)
     logger.info("  limit=%s", args.limit if args.limit is not None else "all")
 
 

@@ -308,10 +308,6 @@ class DataConverter:
         ])
 
         sections.extend(self._collect_workspace_context_sections(workspace_dir, shanghai_now))
-        sections.extend([
-            "",
-            "<<<<<这里是 tools >>>>>",
-        ])
         return "\n".join(sections).strip()
 
     def _collect_workspace_context_sections(self, workspace_dir: Path, now: datetime) -> List[str]:

@@ -82,7 +82,10 @@ cp config/config.yaml.example config/config.yaml
 openclaw:
   worker_prefix: "gendata-worker"
   workspace_root: "~/.openclaw/workspaces"
-  num_workers: 30
+  num_workers: "${CONCURRENT_NUM:-30}"
+  model_url: "${OPENCLAW_MODEL_URL:-https://your-openclaw-model-endpoint/v1}"
+  model_api_key: "${OPENCLAW_MODEL_API_KEY:-your-openclaw-model-api-key}"
+  model: "${OPENCLAW_MODEL_NAME:-your-model}"
   api: "openai-completions"
   enable_thinking: true
   thinking_level: "high"
@@ -93,9 +96,9 @@ openclaw:
     - "apply_patch"
 
 llm:
-  base_url: "http://your-llm-endpoint/v1"
-  api_key: "your-api-key"
-  model: "your-model"
+  base_url: "${LLM_BASE_URL:-https://your-llm-endpoint/v1}"
+  api_key: "${LLM_API_KEY:-your-llm-api-key}"
+  model: "${LLM_MODEL_NAME:-your-model}"
   temperature: 0.7
   max_tokens: 4000
   timeout: 120
@@ -105,11 +108,11 @@ llm:
 
 generation:
   max_turns: 20
-  intents_per_session: 1
+  intents_per_session: "${INTENTS_PER_SESSION:-1}"
   timeout: 600
 
 paths:
-  intents_file: "data_examples/intents.jsonl"
+  intents_file: "${INTENTS_FILE:-data_examples/intents.jsonl}"
   output_dir: "output"
   sessions_dir: "output/sessions"
   middle_format_dir: "output/middle_format"
@@ -122,11 +125,13 @@ paths:
 
 - `openclaw.worker_prefix`：worker agent 前缀，例如 `gendata-worker-1`
 - `openclaw.workspace_root`：worker 独立 workspace 根目录，每个 agent 会使用 `<workspace_root>/<agent_id>`
-- `openclaw.num_workers`：默认并发 worker 数
+- `openclaw.num_workers`：默认并发 worker 数，也可直接通过 `CONCURRENT_NUM` 环境变量覆盖
+- `openclaw.model_url` / `openclaw.model_api_key` / `openclaw.model`：默认支持通过 `OPENCLAW_MODEL_URL` / `OPENCLAW_MODEL_API_KEY` / `OPENCLAW_MODEL_NAME` 环境变量覆盖
 - `openclaw.enable_thinking`：是否开启 OpenClaw 推理模式
 - `openclaw.thinking_level`：OpenClaw thinking 级别，只有开启推理模式时才生效
 - `openclaw.api`：写入 OpenClaw provider 配置时使用的 API 类型
 - `openclaw.worker_tools_allow`：worker agent 使用的工具 allowlist；未配置时使用代码默认值
+- `llm.base_url` / `llm.api_key` / `llm.model`：默认支持通过 `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL_NAME` 环境变量覆盖
 - `llm.max_tokens`：user loop 调用 LLM 生成 query 的最大输出 token 数
 - `llm.timeout`：user loop 调用 LLM 的请求超时
 - `llm.retry_attempts`：user loop 的 user model 最大尝试次数（包含首次请求）
@@ -143,6 +148,13 @@ paths:
 - `INTENTS_FILE`：覆盖 `paths.intents_file`
 - `CONCURRENT_NUM`：覆盖 `openclaw.num_workers`
 - `INTENTS_PER_SESSION`：覆盖 `generation.intents_per_session`
+
+模型相关配置默认支持以下环境变量，适合容器批量覆盖：
+
+- `OPENCLAW_MODEL_URL` / `OPENCLAW_MODEL_API_KEY` / `OPENCLAW_MODEL_NAME`：覆盖 OpenClaw provider 模型配置
+- `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL_NAME`：覆盖 user loop 使用的 LLM 配置
+
+像 `INTENTS_FILE`、`CONCURRENT_NUM`、`INTENTS_PER_SESSION` 这类经常在容器里改的控制项，也已经改成直接在 `config.yaml` 中声明 env placeholder，不需要再在 `config.py` 里为每个变量单独写一段 env 覆盖逻辑。
 
 ### OpenClaw 搜索配置（可选）
 
@@ -444,6 +456,9 @@ docker run --rm -it \
   -e OUTPUT_DIR=/tmp/output \
   -e INTENTS_FILE=/tmp/intents.jsonl \
   -e CONCURRENT_NUM=3 \
+  -e MODEL_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1 \
+  -e MODEL_API_KEY=sk-xxx \
+  -e MODEL_NAME=qwen3.5-plus \
   openclaw-gen-data:amd64 \
   /workspace/scripts/start_generation_in_container.sh
 ```
@@ -459,6 +474,9 @@ docker run --rm -it \
 | `INTENTS_FILE` | 可选 | 覆盖 `config.yaml` 里的 `paths.intents_file`，可指定任意 intents 文件 |
 | `CONCURRENT_NUM` | 可选 | 并发数，默认 `3` |
 | `INTENTS_PER_SESSION` | 可选 | 覆盖 `generation.intents_per_session` |
+| `MODEL_BASE_URL` | 可选 | 同时覆盖 `openclaw.model_url` 和 `llm.base_url` |
+| `MODEL_API_KEY` | 可选 | 同时覆盖 `openclaw.model_api_key` 和 `llm.api_key` |
+| `MODEL_NAME` | 可选 | 同时覆盖 `openclaw.model` 和 `llm.model` |
 | `OPENCLAW_SEARCH_PROVIDER` | 可选 | 搜索 provider；需与下面两个变量一起提供 |
 | `OPENCLAW_SEARCH_API_KEY` | 可选 | 搜索 provider 对应的 API Key |
 | `OPENCLAW_SEARCH_BASE_URL` | 可选 | 搜索 provider 对应的 Base URL |

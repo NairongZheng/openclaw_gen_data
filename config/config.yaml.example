@@ -5,7 +5,7 @@
 openclaw:
   worker_prefix: "gendata-worker"
   workspace_root: "~/.openclaw/workspaces"
-  num_workers: 3
+  num_workers: "${CONCURRENT_NUM:-3}"
   worker_tools_allow:
     - "read"
     - "write"
@@ -26,9 +26,9 @@ openclaw:
     - "agents_list"
     - "image"
     - "tts"
-  model_url: "xxx"
-  model_api_key: "xxx"
-  model: "glm-5"
+  model_url: "${OPENCLAW_MODEL_URL:-https://your-openclaw-model-endpoint/v1}"
+  model_api_key: "${OPENCLAW_MODEL_API_KEY:-your-openclaw-model-api-key}"
+  model: "${OPENCLAW_MODEL_NAME:-glm-5}"
 
   # API 类型：
   api: "openai-completions"     # openai-completions / anthropic-messages
@@ -49,9 +49,9 @@ openclaw:
 
 # ============== LLM API 配置 ==============
 llm:
-  base_url: "xxx"
-  api_key: "xxx"
-  model: "glm-5"
+  base_url: "${LLM_BASE_URL:-https://your-llm-endpoint/v1}"
+  api_key: "${LLM_API_KEY:-your-llm-api-key}"
+  model: "${LLM_MODEL_NAME:-glm-5}"
   temperature: 0.7
   max_tokens: 36000
   timeout: 120
@@ -66,14 +66,14 @@ generation:
   max_turns: 20
 
   # 每个 worker 连续处理多少个 intent 后才重置一次 session / workspace
-  intents_per_session: 1
+  intents_per_session: "${INTENTS_PER_SESSION:-1}"
 
   # 单次 OpenClaw 交互超时（秒）
   timeout: 600
 
 # ============== 路径配置 ==============
 paths:
-  intents_file: "data_examples/intents.jsonl"   # Intent 数据文件路径
+  intents_file: "${INTENTS_FILE:-data_examples/intents.jsonl}"   # Intent 数据文件路径
   output_dir: "output"                          # 输出根目录
   sessions_dir: "output/sessions"               # 归档后的 session jsonl 输出目录
   middle_format_dir: "output/middle_format"     # 中间格式输出目录
