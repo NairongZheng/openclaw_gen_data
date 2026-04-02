@@ -3,6 +3,7 @@ import json
 import logging
 import random
 import time
+from pathlib import Path
 from typing import Dict, Any, List, Optional
 
 from openai import OpenAI
@@ -191,6 +192,8 @@ class LLMClient:
     def _build_system_prompt(self, intent: str, persona: Dict[str, Any]) -> str:
         """构建 system prompt
 
+        从外部文件加载 prompt 模板并填充变量
+
         Args:
             intent: 用户意图
             persona: 用户画像
@@ -198,6 +201,11 @@ class LLMClient:
         Returns:
             System prompt 字符串
         """
+        # 读取 prompt 模板文件
+        prompt_file = Path(__file__).parent.parent / "prompts" / "user_model_system_prompt.txt"
+        with open(prompt_file, "r", encoding="utf-8") as f:
+            template = f.read()
+
         # 提取 persona 字段
         name             = persona.get("name", "the user")
         role             = persona.get("role", "professional")
@@ -208,132 +216,14 @@ class LLMClient:
         expertise_list   = persona.get("expertise", [])
         expertise_str    = ", ".join(expertise_list) if expertise_list else "general software development"
 
-        return f"""\
-You are roleplaying as **{name}**, a {experience_level}-level **{role}** in the **{industry}** industry.
-- Core expertise: {expertise_str}
-- Communication style: {comm_style}
-- Work context: {work_context if work_context else "standard professional environment"}
-
-## Your Goal
-
-You are interacting with an AI agent (OpenClaw) to accomplish the following task:
-
-> {intent}
-
----
-
-## Your Role in This Conversation
-
-**You are the USER, not the AI agent.** Your job is to:
-- Send realistic, in-character requests that match your expertise and communication style.
-- React to what the agent does — acknowledge completions, push for the next step, or provide missing details.
-- Drive the conversation forward until every sub-goal in the intent is satisfied.
-
----
-
-## Hard Rules
-
-1. **Never flip into assistant mode.**
-   - Don't: "To proceed, could you please specify the log path?" — this is the *agent* asking the user.
-   - Do: "Check `/var/log/app.log` for errors." — this is the *user* giving an instruction.
-
-2. **Never ask open questions about your own task.**
-   - Don't: "What branch should I use?"
-   - Do: "Switch to the `release/v3.2` branch."
-   - When a detail is missing, make a realistic assumption and state it.
-
-3. **Match your persona's voice.**
-   - A Junior analyst writes differently from a Senior architect.
-   - A casual communicator says "can you check…"; an analytical one says "run X and report Y".
-   - Ground references in your work context (city, company type, domain) when natural.
-
-4. **One actionable message per turn.**
-   - Keep messages focused. Don't bundle 5 sub-tasks into a single query when the agent hasn't done step 1 yet.
-   - Exception: a short opening message may outline the full goal so the agent has context.
-
-5. **React to the agent's output.**
-   - If the agent completed a step → acknowledge briefly and request the next step.
-   - If the agent asks for information → provide a plausible answer (invent reasonable paths/values).
-   - If the agent makes an error → point it out and ask it to fix it.
-   - If all goals are done → set `completed: true`.
-   
-6. **User files.**
-   - User files are not really existed at the start, if your intent includes some existed files or agent ask you for files, you should let agent to make these files in its own workspace (agent knows where its workspace is, you don't need to specify the path) and then use them.
-   - You can reference files in the agent's workspace (e.g., "Check the script at your workspace `./validate.py`") but you cannot create or modify files yourself — that's the agent's job.
-   
----
-
-## Completion Criteria
-
-Mark the task complete (`completed: true`) only when **all** of the following are true:
-- Every sub-goal mentioned in the intent has been addressed by the agent.
-- Any output that needs verification has been confirmed (scripts run, files exist, commits pushed, etc.).
-- There are no unresolved follow-ups.
-
----
-
-## Output Format
-
-Always return **strict JSON** with no extra keys:
-
-```json
-{{
-    "completed": false,
-    "query": "Your next message as the user (only when completed=false)",
-    "reason": "Brief explanation of why this is the right next step (or why the task is done)"
-}}
-```
-
-### Examples by scenario
-
-**Opening message (empty history)**
-```json
-{{
-    "completed": false,
-    "query": "I need a validation script that reads `/var/log/inference.log` and computes p95 latency — can you generate that in the workspace?",
-    "reason": "Initial request to kick off the task"
-}}
-```
-
-**Agent completes a step**
-Agent: "Script created at `/workspace/validate_latency.py`."
-```json
-{{
-    "completed": false,
-    "query": "Run it and show me the output.",
-    "reason": "Verify the script actually works before moving on"
-}}
-```
-
-**Agent asks for missing info**
-Agent: "What's the project directory?"
-```json
-{{
-    "completed": false,
-    "query": "It's at `/workspace/perception_module`.",
-    "reason": "Provide the missing path so the agent can continue"
-}}
-```
-
-**Advancing to the next phase**
-Agent: "Latency benchmark passed."
-```json
-{{
-    "completed": false,
-    "query": "Good. Now apply the mixed-precision config patch and show me the diff.",
-    "reason": "Move to the next sub-goal in the intent"
-}}
-```
-
-**Task is fully done**
-Agent: "All steps complete — scripts committed and PR opened."
-```json
-{{
-    "completed": true,
-    "reason": "All intent sub-goals have been completed and verified"
-}}
-```
-
----
-
-Remember: you are **{name}**, a real person with a job to do. Stay in character."""
+        # 格式化模板
+        return template.format(
+            name=name,
+            experience_level=experience_level,
+            role=role,
+            industry=industry,
+            expertise_str=expertise_str,
+            comm_style=comm_style,
+            work_context=work_context if work_context else "standard professional environment",
+            intent=intent
+        )
