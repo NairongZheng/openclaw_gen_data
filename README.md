@@ -39,6 +39,7 @@
 - [scripts/run_generation.py](scripts/run_generation.py)：主流程，负责生成、归档、转换、resume
 - [scripts/init_agents.py](scripts/init_agents.py)：初始化 worker agents、配置 model/skills/web-search、生成初始 workspace 快照
 - [src/openclaw_wrapper.py](src/openclaw_wrapper.py)：OpenClaw CLI 与 session 管理
+- [openclaw_plugins/serper](openclaw_plugins/serper)：Serper Web Search 外部插件
 - [src/llm_client.py](src/llm_client.py)：生成下一轮 query
 - [src/converter.py](src/converter.py)：session 转 middle format
 - [tools/tool-inspector/dump_tools.mjs](tools/tool-inspector/dump_tools.mjs)：提取完整 tools catalog
@@ -168,16 +169,57 @@ export OPENCLAW_SEARCH_API_KEY="sk-xxx"
 export OPENCLAW_SEARCH_BASE_URL="https://api.moonshot.cn/v1"
 ```
 
+如果你想启用当前仓库内置的 Serper 搜索插件，也是同样的三元组，不需要额外环境变量：
+
+```bash
+export OPENCLAW_SEARCH_PROVIDER="serper"
+export OPENCLAW_SEARCH_API_KEY="your-serper-api-key"
+export OPENCLAW_SEARCH_BASE_URL="https://google.serper.dev"
+```
+
 说明：
 
 - 只有这 3 个变量都提供时，才会修改 OpenClaw 配置
 - 一旦触发，会自动写入：`tools.web.fetch.enabled = true`
-- 一旦触发，也会自动写入：`tools.web.search = { enabled: true, provider, [provider]: { apiKey, baseUrl } }`
+- 对内置 provider（例如 `kimi`），会自动写入：`tools.web.search = { enabled: true, provider, [provider]: { apiKey, baseUrl } }`
+- 对 `serper`，会自动加载 [openclaw_plugins/serper](openclaw_plugins/serper) 外部插件，并写入 `plugins.load.paths`、`plugins.entries.serper.config.webSearch` 与 `tools.web.search.provider = "serper"`
 - 如果 3 个变量没有给全，就完全跳过，不改现有 OpenClaw 配置
 
 补充说明：
 
 - Kimi 如果走中国站，`baseUrl` 需要显式设成 `https://api.moonshot.cn/v1`
+- Serper 推荐 `baseUrl` 使用 `https://google.serper.dev`
+
+### Serper 插件测试
+
+仓库里已经提供了测试脚本 [tests/test_serper_plugin.py](tests/test_serper_plugin.py)。
+
+静态检查（不访问外网）：
+
+```bash
+/Users/zhengnairong/miniconda3/envs/dev/bin/python tests/test_serper_plugin.py
+```
+
+也可以用 `pytest` 跑：
+
+```bash
+/Users/zhengnairong/miniconda3/envs/dev/bin/python -m pytest -q tests/test_serper_plugin.py
+```
+
+如果要做 Serper 实网 smoke test：
+
+```bash
+OPENCLAW_SEARCH_PROVIDER=serper \
+OPENCLAW_SEARCH_API_KEY=your-serper-api-key \
+OPENCLAW_SEARCH_BASE_URL=https://google.serper.dev \
+/Users/zhengnairong/miniconda3/envs/dev/bin/python tests/test_serper_plugin.py --live
+```
+
+说明：
+
+- 默认模式只检查插件目录结构、manifest、runtime patch 和配置写入
+- `--live` 会额外请求一次 Serper API，用来验证 key / base URL / 返回结构是否可用
+- 如果你是在容器里验证，建议先跑默认模式，再跑 `--live`
 
 ## 使用方式
 
@@ -371,6 +413,18 @@ python scripts/run_generation.py --refresh-tools --limit 1
 
 否则 OpenClaw 会继续使用内置默认值 `https://api.moonshot.ai/v1`。
 
+### 6. 为什么 `serper` 不需要改 OpenClaw 源码
+
+因为当前仓库已经把 Serper 做成了外部 OpenClaw 插件，目录在 [openclaw_plugins/serper](openclaw_plugins/serper)。
+
+当你设置：
+
+- `OPENCLAW_SEARCH_PROVIDER=serper`
+- `OPENCLAW_SEARCH_API_KEY=...`
+- `OPENCLAW_SEARCH_BASE_URL=https://google.serper.dev`
+
+启动脚本会在 gateway 启动前自动把插件加载路径和 `plugins.entries.serper.config.webSearch` 写进 `~/.openclaw/openclaw.json`，不需要 fork 或修改 OpenClaw 主仓库。
+
 ## 相关文档
 
 - [docs/raw_design.txt](docs/raw_design.txt)：原始设计思路
@@ -456,9 +510,15 @@ docker run --rm -it \
   -e OUTPUT_DIR=/tmp/output \
   -e INTENTS_FILE=/tmp/intents.jsonl \
   -e CONCURRENT_NUM=3 \
-  -e MODEL_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1 \
-  -e MODEL_API_KEY=sk-xxx \
-  -e MODEL_NAME=qwen3.5-plus \
+  -e OPENCLAW_MODEL_URL=https://dashscope.aliyuncs.com/compatible-mode/v1 \
+  -e OPENCLAW_MODEL_API_KEY=sk-xxx \
+  -e OPENCLAW_MODEL_NAME=qwen3.5-plus \
+  -e LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1 \
+  -e LLM_API_KEY=sk-xxx \
+  -e LLM_MODEL_NAME=qwen3.5-plus \
+  -e OPENCLAW_SEARCH_PROVIDER=serper \
+  -e OPENCLAW_SEARCH_API_KEY=your-serper-api-key \
+  -e OPENCLAW_SEARCH_BASE_URL=https://google.serper.dev \
   openclaw-gen-data:amd64 \
   /workspace/scripts/start_generation_in_container.sh
 ```
@@ -474,9 +534,12 @@ docker run --rm -it \
 | `INTENTS_FILE` | 可选 | 覆盖 `config.yaml` 里的 `paths.intents_file`，可指定任意 intents 文件 |
 | `CONCURRENT_NUM` | 可选 | 并发数，默认 `3` |
 | `INTENTS_PER_SESSION` | 可选 | 覆盖 `generation.intents_per_session` |
-| `MODEL_BASE_URL` | 可选 | 同时覆盖 `openclaw.model_url` 和 `llm.base_url` |
-| `MODEL_API_KEY` | 可选 | 同时覆盖 `openclaw.model_api_key` 和 `llm.api_key` |
-| `MODEL_NAME` | 可选 | 同时覆盖 `openclaw.model` 和 `llm.model` |
+| `OPENCLAW_MODEL_URL` | 可选 | 覆盖 `openclaw.model_url` |
+| `OPENCLAW_MODEL_API_KEY` | 可选 | 覆盖 `openclaw.model_api_key` |
+| `OPENCLAW_MODEL_NAME` | 可选 | 覆盖 `openclaw.model` |
+| `LLM_BASE_URL` | 可选 | 覆盖 `llm.base_url` |
+| `LLM_API_KEY` | 可选 | 覆盖 `llm.api_key` |
+| `LLM_MODEL_NAME` | 可选 | 覆盖 `llm.model` |
 | `OPENCLAW_SEARCH_PROVIDER` | 可选 | 搜索 provider；需与下面两个变量一起提供 |
 | `OPENCLAW_SEARCH_API_KEY` | 可选 | 搜索 provider 对应的 API Key |
 | `OPENCLAW_SEARCH_BASE_URL` | 可选 | 搜索 provider 对应的 Base URL |
@@ -487,6 +550,8 @@ docker run --rm -it \
 > 运行时参数优先级为 `ENV > CLI > config`。
 >
 > 脚本内部使用 `conda run --no-capture-output`，日志会实时打印到容器标准输出。
+
+当 `OPENCLAW_SEARCH_PROVIDER=serper` 时，启动脚本仍然只认这三个通用搜索变量，不需要额外的 Serper 专用环境变量。
 
 ## CI 自动构建镜像
 

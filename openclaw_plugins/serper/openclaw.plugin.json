@@ -1,0 +1,35 @@
+{
+  "id": "serper",
+  "name": "Serper Plugin",
+  "description": "Web search provider plugin backed by the Serper Search API.",
+  "contracts": {
+    "webSearchProviders": ["serper"]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "webSearch": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "apiKey": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Serper API key."
+          },
+          "baseUrl": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Serper base URL. Defaults to https://google.serper.dev."
+          },
+          "timeoutSeconds": {
+            "type": "number",
+            "minimum": 1,
+            "description": "Optional timeout override for Serper web search requests."
+          }
+        }
+      }
+    }
+  }
+}

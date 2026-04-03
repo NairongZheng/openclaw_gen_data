@@ -1,0 +1,10 @@
+{
+  "name": "serper",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Serper web search provider plugin for OpenClaw",
+  "openclaw": {
+    "extensions": ["./index.js"]
+  }
+}
