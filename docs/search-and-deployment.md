@@ -119,19 +119,27 @@ docker run --rm -it \
 触发规则：
 
 - PR：只做 `arm64` + `amd64` 构建校验，不推送
-- push 到任意分支：只做 `arm64` + `amd64` 构建校验，不推送
-- `workflow_dispatch`：手动触发后，可选择推送 `arm64`、`amd64`
+- push 到 `main` / `master`：只做 `arm64` + `amd64` 构建校验，不推送
+- `workflow_dispatch`：手动触发后，直接使用 GitHub UI 选中的分支，并按需推送 `arm64`、`amd64`
 
 ### 推荐用法
 
 1. 进入 GitHub 仓库的 `Actions`
 2. 打开 `docker-image`
-3. 点击 `Run workflow`
-4. 填写：
+3. 在页面右上角先选好要发布的分支
+4. 点击 `Run workflow`
+5. 填写：
   - `image_tag`：例如 `test-0403`
   - `openclaw_version`：按需填写
   - `push_arm64` / `push_amd64`：按需选择
-5. 运行完成后，从镜像仓库拉取对应 tag
+6. 运行完成后，从镜像仓库拉取对应 tag
+
+工作流会自动使用当前选中的分支进行 checkout，并把分支名带进镜像 tag。
+
+例如如果你选择的是 `dev_damon`，并填写 `image_tag=test-0403`，则会生成：
+
+- `test-0403-dev_damon-arm64`
+- `test-0403-dev_damon-amd64`
 
 依赖的 GitHub Secrets：
 

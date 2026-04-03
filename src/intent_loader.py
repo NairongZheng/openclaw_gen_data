@@ -1,7 +1,11 @@
 """Intent / query 任务加载模块。"""
 import hashlib
 import json
+import logging
 from typing import List, Dict, Any
+
+
+logger = logging.getLogger(__name__)
 
 
 def _build_generated_id(record: Dict[str, Any], task_type: str, line_number: int) -> str:
@@ -81,9 +85,29 @@ def load_intents(filepath: str) -> List[Dict[str, Any]]:
         标准化后的 task 列表
     """
     intents = []
+    skipped_line_numbers: List[int] = []
     with open(filepath, 'r', encoding='utf-8') as f:
         for index, line in enumerate(f, start=1):
             line = line.strip()
             if line:
-                intents.append(normalize_task_record(json.loads(line), index))
+                try:
+                    intents.append(normalize_task_record(json.loads(line), index))
+                except ValueError as exc:
+                    skipped_line_numbers.append(index)
+                    logger.warning("跳过无效 task 记录（file=%s, line=%s）: %s", filepath, index, exc)
+
+    if skipped_line_numbers:
+        preview = ", ".join(str(line_number) for line_number in skipped_line_numbers[:20])
+        if len(skipped_line_numbers) > 20:
+            preview = f"{preview}, ..."
+        logger.warning(
+            "任务文件加载完成，但跳过了 %s 行无效记录（file=%s, lines=%s）",
+            len(skipped_line_numbers),
+            filepath,
+            preview,
+        )
+
+    if not intents:
+        raise ValueError(f"任务文件中没有可用记录: {filepath}")
+
     return intents

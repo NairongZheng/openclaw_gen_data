@@ -53,21 +53,25 @@ export CONCURRENT_NUM="50"  # 并发数
 export OUTPUT_DIR=""     # 输出目录路径
 export INTENTS_PER_SESSION="5"
 export INTENTS_FILE=""
+export APPEND_QUERY_ENABLED="false"
+export APPEND_QUERY_FILE=""
 
 # openclaw 使用的模型
 export OPENCLAW_MODEL_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
 export OPENCLAW_MODEL_API_KEY="sk-xxx"
-export OPENCLAW_MODEL_NAME="qwen3.5-plus"
+export OPENCLAW_MODEL_NAME="qwen3.6-plus"
 
 # usermodel 使用的模型
 export LLM_BASE_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
 export LLM_API_KEY="sk-xxx"
-export LLM_MODEL_NAME="qwen3.5-plus"
+export LLM_MODEL_NAME="qwen3.6-plus"
 
 # openclaw 搜索配置（可选，启用搜索功能需要）
-export OPENCLAW_SEARCH_PROVIDER="kimi"
-export OPENCLAW_SEARCH_API_KEY="sk-xxx"
-export OPENCLAW_SEARCH_BASE_URL="https://api.moonshot.cn/v1"
+export OPENCLAW_SEARCH_PROVIDER="serper"
+export OPENCLAW_SEARCH_API_KEY="xxx"
+export OPENCLAW_SEARCH_BASE_URL="https://google.serper.dev"
 
 # 一键启动
 bash scripts/start_generation_in_container.sh
+
+# sleep 0.5d

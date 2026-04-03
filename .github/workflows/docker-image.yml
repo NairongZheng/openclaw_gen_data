@@ -76,6 +76,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Show selected branch
+        shell: bash
+        run: |
+          echo "selected_ref=${{ github.ref }}"
+          echo "selected_branch=${{ github.ref_name }}"
+          git rev-parse HEAD
+          git log -1 --oneline --decorate
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -96,7 +106,7 @@ jobs:
         with:
           images: ${{ secrets.ALIYUN_REGISTRY }}/${{ secrets.ALIYUN_NAMESPACE }}/${{ github.event.repository.name }}
           tags: |
-            type=raw,value=${{ inputs.image_tag }}-arm64
+            type=raw,value=${{ inputs.image_tag }}-${{ github.ref_name }}-arm64
 
       - name: Build and push arm64 image to Aliyun
         uses: docker/build-push-action@v6
@@ -108,7 +118,10 @@ jobs:
           provenance: false
           sbom: false
           tags: ${{ steps.meta_aliyun_arm64.outputs.tags }}
-          labels: ${{ steps.meta_aliyun_arm64.outputs.labels }}
+          labels: |
+            ${{ steps.meta_aliyun_arm64.outputs.labels }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            io.openclaw.build.branch=${{ github.ref_name }}
           build-args: |
             OPENCLAW_VERSION=${{ inputs.openclaw_version }}
           cache-from: type=gha,scope=aliyun-arm64
@@ -123,6 +136,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Show selected branch
+        shell: bash
+        run: |
+          echo "selected_ref=${{ github.ref }}"
+          echo "selected_branch=${{ github.ref_name }}"
+          git rev-parse HEAD
+          git log -1 --oneline --decorate
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -140,7 +163,7 @@ jobs:
         with:
           images: ${{ secrets.ALIYUN_REGISTRY }}/${{ secrets.ALIYUN_NAMESPACE }}/${{ github.event.repository.name }}
           tags: |
-            type=raw,value=${{ inputs.image_tag }}-amd64
+            type=raw,value=${{ inputs.image_tag }}-${{ github.ref_name }}-amd64
 
       - name: Build and push amd64 image to Aliyun
         uses: docker/build-push-action@v6
@@ -152,7 +175,10 @@ jobs:
           provenance: false
           sbom: false
           tags: ${{ steps.meta_aliyun.outputs.tags }}
-          labels: ${{ steps.meta_aliyun.outputs.labels }}
+          labels: |
+            ${{ steps.meta_aliyun.outputs.labels }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            io.openclaw.build.branch=${{ github.ref_name }}
           build-args: |
             OPENCLAW_VERSION=${{ inputs.openclaw_version }}
           cache-from: type=gha,scope=aliyun-amd64

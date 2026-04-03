@@ -69,6 +69,25 @@ class TaskModeTests(unittest.TestCase):
         self.assertEqual([task["task_type"] for task in tasks], ["intent", "direct_query"])
         self.assertEqual(tasks[1]["natural_language_intent"], tasks[1]["query"])
 
+    def test_load_intents_skips_invalid_empty_intent_rows(self) -> None:
+        records = [
+            {"id": "intent_a", "natural_language_intent": "搜索上海今天的天气"},
+            {"id": "intent_bad", "natural_language_intent": ""},
+            {"id": "query_a", "question": "上海明天会下雨吗？"},
+        ]
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".jsonl", delete=False) as handle:
+            path = Path(handle.name)
+            for record in records:
+                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+        try:
+            tasks = load_intents(str(path))
+        finally:
+            path.unlink(missing_ok=True)
+
+        self.assertEqual(len(tasks), 2)
+        self.assertEqual([task["id"] for task in tasks], ["intent_a", "query_a"])
+
     def test_select_append_query_task_is_stable(self) -> None:
         pool = [
             {"id": "query_1", "task_type": "direct_query", "query": "q1"},
