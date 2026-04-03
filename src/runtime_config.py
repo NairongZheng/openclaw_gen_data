@@ -61,6 +61,7 @@ def build_serper_search_patch(api_key: str, base_url: str) -> Dict[str, Any]:
             }
         },
         "plugins": {
+            "allow": [SERPER_PLUGIN_ID],
             "load": {
                 "paths": [str(SERPER_PLUGIN_DIR)],
             },

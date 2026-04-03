@@ -129,6 +129,7 @@ class SerperPluginStaticTests(unittest.TestCase):
 
         self.assertEqual(patch["tools"]["web"]["search"]["provider"], "serper")
         self.assertTrue(patch["tools"]["web"]["fetch"]["enabled"])
+        self.assertEqual(patch["plugins"]["allow"], ["serper"])
         self.assertEqual(patch["plugins"]["load"]["paths"], [str(runtime_config.SERPER_PLUGIN_DIR)])
         self.assertTrue(patch["plugins"]["entries"]["serper"]["enabled"])
         self.assertEqual(
@@ -149,6 +150,7 @@ class SerperPluginStaticTests(unittest.TestCase):
             saved = openclaw_wrapper.load_openclaw_config(config_path=config_path)
 
         self.assertEqual(saved["tools"]["web"]["search"]["provider"], "serper")
+        self.assertEqual(saved["plugins"]["allow"], ["serper"])
         self.assertEqual(saved["plugins"]["load"]["paths"], [str(runtime_config.SERPER_PLUGIN_DIR)])
         self.assertEqual(
             saved["plugins"]["entries"]["serper"]["config"]["webSearch"]["baseUrl"],
