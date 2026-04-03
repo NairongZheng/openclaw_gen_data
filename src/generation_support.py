@@ -1,9 +1,10 @@
 """run_generation 共享的生成流程辅助逻辑。"""
+import hashlib
 import logging
 import shutil
 import threading
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from src.converter import DataConverter
 from src.llm_client import LLMClient
@@ -79,6 +80,35 @@ def resolve_intents_per_session(config: Dict[str, Any]) -> int:
     return max(1, value)
 
 
+def resolve_append_query_enabled(config: Dict[str, Any]) -> bool:
+    """解析 session 收口前是否启用追加 query。"""
+    raw_value = config.get("generation", {}).get("append_query_enabled", False)
+    if isinstance(raw_value, bool):
+        return raw_value
+    normalized = str(raw_value).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off", ""}:
+        return False
+    logger.warning("generation.append_query_enabled=%r 非法，回退为 false", raw_value)
+    return False
+
+
+def resolve_append_query_file(config: Dict[str, Any]) -> str:
+    """解析 session 收口前追加 query 的数据文件路径。"""
+    raw_value = config.get("generation", {}).get("append_query_file", "")
+    return str(raw_value or "").strip()
+
+
+def select_append_query_task(query_pool: List[Dict[str, Any]], anchor_id: Any) -> Optional[Dict[str, Any]]:
+    """基于 anchor_id 稳定选择一条追加 query。"""
+    if not query_pool:
+        return None
+    digest = hashlib.md5(str(anchor_id).encode("utf-8")).hexdigest()
+    index = int(digest[:8], 16) % len(query_pool)
+    return dict(query_pool[index])
+
+
 def summarize_final_results(results: List[Dict[str, Any]]) -> Dict[str, Any]:
     """按 intent 聚合结果，保留每个 intent 的最终状态。"""
     latest_results_by_intent: Dict[str, Dict[str, Any]] = {}
@@ -150,21 +180,26 @@ def build_middle_format_path(paths_config: Dict[str, Any], intent_id: Any) -> Pa
 def build_session_batch_metadata(
     session_results: List[Dict[str, Any]],
     finalized_by_intent_id: Any,
+    appended_query: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     intent_ids = [str(result.get("intent_id")) for result in session_results]
     intent_records = [
         {
             "intent_id": str(result.get("intent_id")),
             "natural_language_intent": (result.get("intent_data") or {}).get("natural_language_intent"),
+            "task_type": (result.get("intent_data") or {}).get("task_type", "intent"),
         }
         for result in session_results
     ]
-    return {
+    metadata = {
         "intent_count": len(session_results),
         "intent_ids": intent_ids,
         "finalized_by_intent_id": str(finalized_by_intent_id),
         "intent_records": intent_records,
     }
+    if appended_query:
+        metadata["appended_query"] = appended_query
+    return metadata
 
 
 def snapshot_session_for_later_materialization(

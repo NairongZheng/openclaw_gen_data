@@ -68,12 +68,18 @@ generation:
   # 每个 worker 连续处理多少个 intent 后才重置一次 session / workspace
   intents_per_session: "${INTENTS_PER_SESSION:-1}"
 
+  # 可选：是否在每次正常 session 收口前追加一条 direct_query/search query
+  append_query_enabled: "${APPEND_QUERY_ENABLED:-false}"
+
+  # 可选：追加 query 池文件路径，支持 query/question JSONL
+  append_query_file: "${APPEND_QUERY_FILE:-}"
+
   # 单次 OpenClaw 交互超时（秒）
   timeout: 600
 
 # ============== 路径配置 ==============
 paths:
-  intents_file: "${INTENTS_FILE:-data_examples/intents.jsonl}"   # Intent 数据文件路径
+  intents_file: "${INTENTS_FILE:-data_examples/intents.jsonl}"   # 主任务文件路径：可为 intent JSONL，或 query/question JSONL
   output_dir: "output"                          # 输出根目录
   sessions_dir: "output/sessions"               # 归档后的 session jsonl 输出目录
   middle_format_dir: "output/middle_format"     # 中间格式输出目录

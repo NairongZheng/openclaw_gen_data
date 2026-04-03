@@ -30,8 +30,11 @@ from src.generation_support import (
     create_llm_client,
     load_agent_tools,
     materialize_intent_output,
+    resolve_append_query_enabled,
+    resolve_append_query_file,
     resolve_intents_per_session,
     resolve_openclaw_thinking_mode,
+    select_append_query_task,
     summarize_final_results,
 )
 from src.runtime_config import apply_runtime_patch_from_env
@@ -61,6 +64,18 @@ _runtime_recovery_requested = threading.Event()
 _runtime_recovery_reason_lock = threading.Lock()
 _runtime_recovery_reason: str = ""
 _runtime_recovery_requested_at: Optional[float] = None
+
+
+def _task_type(task_data: Dict[str, Any]) -> str:
+    return str(task_data.get("task_type") or "intent")
+
+
+def _task_id(task_data: Dict[str, Any]) -> str:
+    return str(task_data.get("id", "unknown"))
+
+
+def _task_prompt(task_data: Dict[str, Any]) -> str:
+    return str(task_data.get("query") or task_data.get("natural_language_intent") or "").strip()
 
 def request_runtime_recovery(reason: str) -> None:
     """请求全局运行时恢复（停止当前批次，回滚配置后重跑）。"""
@@ -122,6 +137,58 @@ def _build_interrupted_result(
     }
 
 
+def maybe_append_query_before_finalize(
+    openclaw: OpenClawWrapper,
+    config: Dict[str, Any],
+    query_pool: List[Dict[str, Any]],
+    session_results: List[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """在 session 收口前可选追加一条 search query。失败只记日志，不中断主流程。"""
+    if not resolve_append_query_enabled(config) or not query_pool or not session_results:
+        return None
+
+    anchor_result = session_results[-1]
+    selected_task = select_append_query_task(query_pool, anchor_result.get("intent_id"))
+    if not selected_task:
+        return None
+
+    query = _task_prompt(selected_task)
+    if not query:
+        return {
+            "status": "skipped",
+            "query_task_id": _task_id(selected_task),
+            "reason": "empty_query",
+        }
+
+    try:
+        response = openclaw.send_message(
+            query,
+            timeout=config["generation"]["timeout"],
+            thinking=resolve_openclaw_thinking_mode(config),
+        )
+        latest_session_info = openclaw.get_current_session_info()
+        if latest_session_info:
+            anchor_result["session_info"] = latest_session_info
+
+        assistant_text = OpenClawWrapper.extract_assistant_text(response)
+        return {
+            "status": "success",
+            "query_task_id": _task_id(selected_task),
+            "query": query,
+            "query_task_type": _task_type(selected_task),
+            "assistant_preview": assistant_text[:200],
+        }
+    except Exception as exc:
+        logger.warning("session 收口前追加 query 失败（task=%s）: %s", _task_id(selected_task), exc)
+        return {
+            "status": "failed",
+            "query_task_id": _task_id(selected_task),
+            "query": query,
+            "query_task_type": _task_type(selected_task),
+            "error": str(exc),
+        }
+
+
 def log_runtime_config_summary(args: argparse.Namespace, config: Dict[str, Any], config_path: str) -> None:
     """统一打印本次运行生效的关键配置。"""
     paths_config = config["paths"]
@@ -140,6 +207,8 @@ def log_runtime_config_summary(args: argparse.Namespace, config: Dict[str, Any],
     logger.info("  output_dir=%s", paths_config.get("output_dir"))
     logger.info("  intents_file=%s", paths_config.get("intents_file"))
     logger.info("  intents_per_session=%s", generation_config.get("intents_per_session"))
+    logger.info("  append_query_enabled=%s", generation_config.get("append_query_enabled", False))
+    logger.info("  append_query_file=%s", generation_config.get("append_query_file"))
     logger.info("  limit=%s", args.limit if args.limit is not None else "all")
 
 
@@ -150,15 +219,47 @@ def process_intent(
     llm: LLMClient,
     start_new_session: bool,
 ) -> Dict[str, Any]:
-    """处理单个 intent。"""
-    intent_id = intent_data.get("id", "unknown")
-    logger.info(f"[{agent_name}] 开始处理 intent: {intent_id}")
+    """处理单个 task（兼容 intent 与 direct_query）。"""
+    intent_id = _task_id(intent_data)
+    task_type = _task_type(intent_data)
+    logger.info(f"[{agent_name}] 开始处理 {task_type}: {intent_id}")
 
     openclaw = OpenClawWrapper(agent_name)
     try:
         if start_new_session:
             restore_workspace_snapshot(agent_name, config)
             openclaw.reset_main_session()
+
+        if task_type == "direct_query":
+            query = _task_prompt(intent_data)
+            if not query:
+                raise RuntimeError("direct_query 缺少 query")
+
+            logger.info(f"[{agent_name}] Direct query: {query[:100]}...")
+            openclaw.send_message(
+                query,
+                timeout=config["generation"]["timeout"],
+                thinking=resolve_openclaw_thinking_mode(config),
+            )
+
+            session_info = openclaw.get_current_session_info()
+            if not session_info:
+                raise RuntimeError(f"[{agent_name}] 未找到 session 信息，无法归档")
+
+            logger.info(f"[{agent_name}] ✓ Direct query {intent_id} 处理完成")
+            return {
+                "intent_id": str(intent_id),
+                "status": "success",
+                "agent_name": agent_name,
+                "intent_data": intent_data,
+                "session_info": session_info,
+                "started_new_session": start_new_session,
+                "finalized_session_after": False,
+                "completed": True,
+                "completion_reason": "direct_query_completed",
+                "turns": 1,
+                "task_type": task_type,
+            }
 
         conversation_history = []
         max_turns = config["generation"].get("max_turns", 20)
@@ -244,6 +345,7 @@ def process_intent(
             "completed": completed,
             "completion_reason": completion_reason,
             "turns": len(conversation_history) // 2,
+            "task_type": task_type,
         }
 
     except Exception as e:
@@ -251,7 +353,7 @@ def process_intent(
             openclaw.reset_main_session()
         except Exception as reset_error:
             logger.warning(f"[{agent_name}] reset 失败: {reset_error}")
-        logger.error(f"[{agent_name}] ✗ Intent {intent_id} 失败: {e}")
+        logger.error(f"[{agent_name}] ✗ Task {intent_id} 失败: {e}")
         return {
             "intent_id": str(intent_id),
             "status": "failed",
@@ -266,6 +368,7 @@ def worker_loop(
     config: Dict[str, Any],
     tools_cache_file: str,
     progress: ProgressTracker,
+    append_query_pool: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
     """单个 worker 串行消费 intent 队列，但多个 worker 之间并发。
 
@@ -332,7 +435,17 @@ def worker_loop(
 
             if should_finalize_session:
                 session_results = [*pending_session_results, result]
-                session_batch_metadata = build_session_batch_metadata(session_results, result["intent_id"])
+                appended_query_meta = maybe_append_query_before_finalize(
+                    openclaw,
+                    config,
+                    append_query_pool,
+                    session_results,
+                )
+                session_batch_metadata = build_session_batch_metadata(
+                    session_results,
+                    result["intent_id"],
+                    appended_query=appended_query_meta,
+                )
                 final_session_file = build_archived_session_path(
                     config["paths"],
                     result["intent_id"],
@@ -447,7 +560,17 @@ def worker_loop(
 
             final_pending_result = pending_session_results[-1]
             previous_pending_results = pending_session_results[:-1]
-            session_batch_metadata = build_session_batch_metadata(pending_session_results, final_pending_result["intent_id"])
+            appended_query_meta = maybe_append_query_before_finalize(
+                openclaw,
+                config,
+                append_query_pool,
+                pending_session_results,
+            )
+            session_batch_metadata = build_session_batch_metadata(
+                pending_session_results,
+                final_pending_result["intent_id"],
+                appended_query=appended_query_meta,
+            )
             final_session_file = build_archived_session_path(
                 config["paths"],
                 final_pending_result["intent_id"],
@@ -579,7 +702,17 @@ def main():
     intents_file = paths_config["intents_file"]
     logger.info(f"使用 intents 文件: {intents_file}")
     intents = load_intents(intents_file)
-    logger.info(f"加载 {len(intents)} 个 intents")
+    logger.info(f"加载 {len(intents)} 个 tasks")
+
+    append_query_file = resolve_append_query_file(config)
+    append_query_pool: List[Dict[str, Any]] = []
+    if append_query_file:
+        logger.info("加载 session 收口追加 query 文件: %s", append_query_file)
+        append_query_pool = [
+            task for task in load_intents(append_query_file)
+            if _task_type(task) == "direct_query"
+        ]
+        logger.info("追加 query 池大小: %s", len(append_query_pool))
 
     if args.limit:
         intents = intents[:args.limit]
@@ -632,7 +765,8 @@ def main():
                     task_queue,
                     config,
                     paths_config["tools_cache_file"],
-                    progress
+                    progress,
+                    append_query_pool,
                 )
                 futures.append(future)
 

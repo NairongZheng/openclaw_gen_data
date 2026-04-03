@@ -4,10 +4,13 @@ on:
   pull_request:
   push:
     branches:
-      - main
-      - master
+      - '**'
   workflow_dispatch:
     inputs:
+      git_ref:
+        description: Git ref to build (branch, tag, or SHA)
+        required: true
+        default: main
       image_tag:
         description: Image tag to push to Aliyun
         required: true
@@ -76,6 +79,21 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.git_ref }}
+
+      - name: Compute branch tag suffix
+        id: ref_meta
+        shell: bash
+        run: |
+          RAW_REF="${{ inputs.git_ref }}"
+          RAW_REF="${RAW_REF#refs/heads/}"
+          RAW_REF="${RAW_REF#refs/tags/}"
+          SAFE_REF=$(echo "$RAW_REF" | tr '[:upper:]' '[:lower:]' | sed -E 's#[^a-z0-9._-]+#-#g; s#-+#-#g; s#^-##; s#-$##')
+          if [[ -z "$SAFE_REF" ]]; then
+            SAFE_REF="detached"
+          fi
+          echo "safe_ref=$SAFE_REF" >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -96,7 +114,7 @@ jobs:
         with:
           images: ${{ secrets.ALIYUN_REGISTRY }}/${{ secrets.ALIYUN_NAMESPACE }}/${{ github.event.repository.name }}
           tags: |
-            type=raw,value=${{ inputs.image_tag }}-arm64
+            type=raw,value=${{ inputs.image_tag }}-${{ steps.ref_meta.outputs.safe_ref }}-arm64
 
       - name: Build and push arm64 image to Aliyun
         uses: docker/build-push-action@v6
@@ -123,6 +141,21 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.git_ref }}
+
+      - name: Compute branch tag suffix
+        id: ref_meta
+        shell: bash
+        run: |
+          RAW_REF="${{ inputs.git_ref }}"
+          RAW_REF="${RAW_REF#refs/heads/}"
+          RAW_REF="${RAW_REF#refs/tags/}"
+          SAFE_REF=$(echo "$RAW_REF" | tr '[:upper:]' '[:lower:]' | sed -E 's#[^a-z0-9._-]+#-#g; s#-+#-#g; s#^-##; s#-$##')
+          if [[ -z "$SAFE_REF" ]]; then
+            SAFE_REF="detached"
+          fi
+          echo "safe_ref=$SAFE_REF" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -140,7 +173,7 @@ jobs:
         with:
           images: ${{ secrets.ALIYUN_REGISTRY }}/${{ secrets.ALIYUN_NAMESPACE }}/${{ github.event.repository.name }}
           tags: |
-            type=raw,value=${{ inputs.image_tag }}-amd64
+            type=raw,value=${{ inputs.image_tag }}-${{ steps.ref_meta.outputs.safe_ref }}-amd64
 
       - name: Build and push amd64 image to Aliyun
         uses: docker/build-push-action@v6
