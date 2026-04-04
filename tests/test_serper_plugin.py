@@ -137,6 +137,34 @@ class SerperPluginStaticTests(unittest.TestCase):
             "test-key",
         )
 
+    def test_build_search_runtime_patch_from_env_is_independent(self) -> None:
+        env = {
+            "OPENCLAW_SEARCH_PROVIDER": "serper",
+            "OPENCLAW_SEARCH_API_KEY": "test-key",
+            "OPENCLAW_SEARCH_BASE_URL": "https://google.serper.dev",
+            "OPENCLAW_DISCOVERY_MDNS_MODE": None,
+        }
+        with temporary_env(env):
+            patch = runtime_config.build_search_runtime_patch_from_env()
+
+        assert patch is not None
+        self.assertEqual(patch["tools"]["web"]["search"]["provider"], "serper")
+        self.assertNotIn("discovery", patch)
+
+    def test_build_discovery_runtime_patch_from_env_is_independent(self) -> None:
+        env = {
+            "OPENCLAW_SEARCH_PROVIDER": None,
+            "OPENCLAW_SEARCH_API_KEY": None,
+            "OPENCLAW_SEARCH_BASE_URL": None,
+            "OPENCLAW_DISCOVERY_MDNS_MODE": "off",
+        }
+        with temporary_env(env):
+            patch = runtime_config.build_discovery_runtime_patch_from_env()
+
+        assert patch is not None
+        self.assertEqual(patch["discovery"]["mdns"]["mode"], "off")
+        self.assertNotIn("tools", patch)
+
     def test_apply_runtime_patch_writes_serper_config(self) -> None:
         env = {
             "OPENCLAW_SEARCH_PROVIDER": "serper",
@@ -156,6 +184,21 @@ class SerperPluginStaticTests(unittest.TestCase):
             saved["plugins"]["entries"]["serper"]["config"]["webSearch"]["baseUrl"],
             "https://google.serper.dev",
         )
+
+    def test_apply_runtime_patch_can_write_mdns_mode_without_search_env(self) -> None:
+        env = {
+            "OPENCLAW_SEARCH_PROVIDER": None,
+            "OPENCLAW_SEARCH_API_KEY": None,
+            "OPENCLAW_SEARCH_BASE_URL": None,
+            "OPENCLAW_DISCOVERY_MDNS_MODE": "off",
+        }
+        with temporary_env(env), temporary_openclaw_config_path() as config_path:
+            changed = runtime_config.apply_runtime_patch_from_env()
+            self.assertTrue(changed)
+
+            saved = openclaw_wrapper.load_openclaw_config(config_path=config_path)
+
+        self.assertEqual(saved["discovery"]["mdns"]["mode"], "off")
 
 
 def run_live_serper_smoke_test() -> None:

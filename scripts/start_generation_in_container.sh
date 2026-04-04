@@ -24,7 +24,8 @@ OUTPUT_DIR="${OUTPUT_DIR:?请设置 OUTPUT_DIR 环境变量，指向输出目录
 # OPENCLAW_SEARCH_PROVIDER : search provider
 # OPENCLAW_SEARCH_API_KEY  : 当前 provider 的 apiKey
 # OPENCLAW_SEARCH_BASE_URL : 当前 provider 的 baseUrl
-# 只有这三个变量都提供时，才会自动开启 web.fetch/web.search 并写入 OpenClaw 配置
+# OPENCLAW_DISCOVERY_MDNS_MODE : OpenClaw discovery.mdns.mode；容器里默认 off，避免长 hostname 触发 mDNS label 超长崩溃
+# 注意：search 相关配置需要 provider/apiKey/baseUrl 三者齐全；discovery.mdns.mode 可独立生效
 # ====================================================
 CONFIG_PATH="${CONFIG_PATH:-}"
 CONCURRENT_NUM="${CONCURRENT_NUM:-3}"
@@ -41,6 +42,7 @@ APPEND_QUERY_FILE="${APPEND_QUERY_FILE:-}"
 OPENCLAW_SEARCH_PROVIDER="${OPENCLAW_SEARCH_PROVIDER:-}"
 OPENCLAW_SEARCH_API_KEY="${OPENCLAW_SEARCH_API_KEY:-}"
 OPENCLAW_SEARCH_BASE_URL="${OPENCLAW_SEARCH_BASE_URL:-}"
+OPENCLAW_DISCOVERY_MDNS_MODE="${OPENCLAW_DISCOVERY_MDNS_MODE:-off}"
 
 export CONFIG_PATH CONCURRENT_NUM
 export OPENCLAW_MODEL_URL OPENCLAW_MODEL_API_KEY OPENCLAW_MODEL_NAME
@@ -49,6 +51,7 @@ export INTENTS_PER_SESSION INTENTS_FILE
 export APPEND_QUERY_ENABLED APPEND_QUERY_FILE
 export OPENCLAW_SEARCH_PROVIDER OPENCLAW_SEARCH_API_KEY
 export OPENCLAW_SEARCH_BASE_URL
+export OPENCLAW_DISCOVERY_MDNS_MODE
 
 CONDA_DIR="${CONDA_DIR:-/opt/miniconda3}"
 CONDA_ENV_NAME="${CONDA_ENV_NAME:-dev}"
@@ -61,12 +64,7 @@ export PYTHONUNBUFFERED=1
 ensure_openclaw_runtime_config() {
   local runtime_output
 
-  if [[ -z "${OPENCLAW_SEARCH_PROVIDER}" || -z "${OPENCLAW_SEARCH_API_KEY}" || -z "${OPENCLAW_SEARCH_BASE_URL}" ]]; then
-    echo "[start] search config incomplete, skip OpenClaw runtime config"
-    return 1
-  fi
-
-  echo "[start] ensuring OpenClaw runtime config (fetch/search default enabled; provider/key/baseUrl auto-applied)"
+  echo "[start] ensuring OpenClaw runtime config (search/discovery patches auto-applied when configured)"
 
   runtime_output=$("${CONDA_DIR}/bin/conda" run --no-capture-output -n "${CONDA_ENV_NAME}" \
     python -m src.runtime_config 2>&1)

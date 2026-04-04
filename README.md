@@ -16,6 +16,13 @@
 
 ## 快速开始
 
+下面这套快速开始适用于：
+
+- 你已经在本机安装并初始化过 `openclaw`
+- 你希望直接在当前 Python 环境里运行，而不是通过 Docker 容器启动
+
+如果你主要在容器里跑，推荐直接使用 [scripts/start_generation_in_container.sh](scripts/start_generation_in_container.sh)，并参考 [docs/search-and-deployment.md](docs/search-and-deployment.md)。
+
 1. 安装依赖
 
 ```bash
@@ -40,6 +47,26 @@ paths:
 
 运行时优先级：`ENV > CLI > config`
 
+如果你要启用搜索能力，还需要额外提供：
+
+- `OPENCLAW_SEARCH_PROVIDER`
+- `OPENCLAW_SEARCH_API_KEY`
+- `OPENCLAW_SEARCH_BASE_URL`
+
+如果你是在容器中手动启动 `openclaw gateway run`，还建议确保 `~/.openclaw/openclaw.json` 中有：
+
+```json
+{
+  "discovery": {
+    "mdns": {
+      "mode": "off"
+    }
+  }
+}
+```
+
+这是为了避免某些长 hostname 容器里 `gateway` 因 mDNS 广播名超长而启动后立刻崩溃。
+
 3. 初始化 agents
 
 ```bash
@@ -51,6 +78,8 @@ python scripts/init_agents.py --num-agents 4 --force-recreate --refresh-tools
 ```bash
 python scripts/run_generation.py --concurrent 4
 ```
+
+如果你希望用容器启动整套流程，见 [docs/search-and-deployment.md](docs/search-and-deployment.md) 中的 Docker 示例。
 
 ## 三种运行模式
 

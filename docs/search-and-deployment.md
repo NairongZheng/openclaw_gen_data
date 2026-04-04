@@ -2,9 +2,11 @@
 
 本文汇总 README 中不适合放在首页的运行细节，包括搜索 provider、Serper 插件、Docker 与 CI。
 
-## 搜索配置
+## 运行时配置
 
 当前推荐通过 [scripts/start_generation_in_container.sh](../scripts/start_generation_in_container.sh) 在 `init_agents` 完成后、gateway 启动前 patch `~/.openclaw/openclaw.json`。
+
+### 搜索配置
 
 只要同时提供以下三个变量，脚本就会写入搜索配置：
 
@@ -12,7 +14,7 @@
 - `OPENCLAW_SEARCH_API_KEY`
 - `OPENCLAW_SEARCH_BASE_URL`
 
-如果三者没有给全，就完全跳过，不修改现有 OpenClaw 配置。
+如果三者没有给全，就跳过搜索配置，不修改现有 search provider。
 
 常见示例：
 
@@ -21,6 +23,18 @@ export OPENCLAW_SEARCH_PROVIDER="kimi"
 export OPENCLAW_SEARCH_API_KEY="sk-xxx"
 export OPENCLAW_SEARCH_BASE_URL="https://api.moonshot.cn/v1"
 ```
+
+### Discovery 配置
+
+容器场景下，启动脚本默认还会写入：
+
+- `discovery.mdns.mode=off`
+
+这是为了避免某些 Docker / Kubernetes 环境里 hostname 过长时，OpenClaw 在 browser control 的 mDNS/Bonjour 广播阶段触发 `Label cannot be longer than 63 bytes` 并导致 gateway 启动后立刻崩溃。
+
+也可以显式覆盖：
+
+- `OPENCLAW_DISCOVERY_MDNS_MODE`（容器内默认 `off`）
 
 ## Serper 插件
 
@@ -92,6 +106,7 @@ docker buildx build --platform linux/amd64 -t openclaw-gen-data:amd64 --load .
 
 ```bash
 docker run --rm -it \
+  --hostname openclaw \
   -v /local_path/to/config.yaml:/tmp/config.yaml:ro \
   -v /local_path/to/intents.jsonl:/tmp/intents.jsonl:ro \
   -v /local_path/to/output:/tmp/output \
@@ -111,6 +126,13 @@ docker run --rm -it \
   openclaw-gen-data:amd64 \
   /workspace/scripts/start_generation_in_container.sh
 ```
+
+说明：
+
+- 当前启动脚本默认会写入 `discovery.mdns.mode=off`，因此通常不再需要依赖短 hostname 来规避这个问题
+- 如果你是手动运行原生 `openclaw gateway run`，仍然建议显式传 `--hostname openclaw`（或其他较短值）
+- OpenClaw 在启动 gateway 时会为本地 browser control 服务做 mDNS/Bonjour 广播，并把 hostname 拼进广播名
+- 如果容器 / Pod hostname 太长（例如某些自动生成的 K8s Pod 名），会触发 `Label cannot be longer than 63 bytes`，导致 gateway 刚启动就崩溃；关闭 `discovery.mdns` 可以规避
 
 ## CI 镜像构建
 

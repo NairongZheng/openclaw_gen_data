@@ -3,11 +3,10 @@
 这个模块的定位是：
 1. 在任务启动前，按需修改 OpenClaw 的运行时配置（`~/.openclaw/openclaw.json`）
 2. 只在配置实际发生变化时写盘，避免无意义重启依赖它的进程
-3. 当前默认入口只处理 search/fetch 相关配置
+3. 将不同关注点（如 search、discovery）分别构造成独立 patch，再在顶层统一合并
 
-也就是说，它本身是一个更通用的 runtime config patch 能力；
-只是当前项目里，暂时只拿它来处理 `web.search` / `web.fetch`。
-后续如果初始化阶段还需要补别的 OpenClaw 任务配置，也可以继续复用这里。
+也就是说，它本身是一个通用的 runtime config patch 能力；
+不同配置域共享同一个写盘入口，但生成逻辑彼此独立，避免概念耦合。
 """
 import logging
 import os
@@ -80,6 +79,17 @@ def build_serper_search_patch(api_key: str, base_url: str) -> Dict[str, Any]:
     }
 
 
+def build_discovery_patch(mdns_mode: str) -> Dict[str, Any]:
+    """为 OpenClaw discovery 配置构造 runtime patch。"""
+    return {
+        "discovery": {
+            "mdns": {
+                "mode": mdns_mode,
+            }
+        }
+    }
+
+
 def merge_dicts(base: Dict[str, Any], updates: Dict[str, Any]) -> Dict[str, Any]:
     """递归合并字典，updates 优先。"""
     merged: Dict[str, Any] = dict(base)
@@ -113,6 +123,62 @@ def resolve_search_env_config() -> Optional[Dict[str, str]]:
     }
 
 
+def resolve_discovery_env_config() -> Optional[Dict[str, str]]:
+    """解析 discovery runtime 环境变量。"""
+    mdns_mode = os.getenv("OPENCLAW_DISCOVERY_MDNS_MODE", "").strip().lower()
+    if not mdns_mode:
+        return None
+
+    return {
+        "mdns_mode": mdns_mode,
+    }
+
+
+def build_search_runtime_patch_from_env() -> Optional[Dict[str, Any]]:
+    """从环境变量生成 search runtime patch。"""
+    search_env = resolve_search_env_config()
+    if search_env is None:
+        return None
+
+    if search_env["provider"] == SERPER_PLUGIN_ID:
+        if not SERPER_PLUGIN_DIR.exists():
+            raise FileNotFoundError(f"Serper plugin directory not found: {SERPER_PLUGIN_DIR}")
+        return build_serper_search_patch(
+            api_key=search_env["api_key"],
+            base_url=search_env["base_url"],
+        )
+
+    return build_search_patch(
+        provider=search_env["provider"],
+        api_key=search_env["api_key"],
+        base_url=search_env["base_url"],
+    )
+
+
+def build_discovery_runtime_patch_from_env() -> Optional[Dict[str, Any]]:
+    """从环境变量生成 discovery runtime patch。"""
+    discovery_env = resolve_discovery_env_config()
+    if discovery_env is None:
+        return None
+
+    return build_discovery_patch(discovery_env["mdns_mode"])
+
+
+def build_runtime_patch_from_env() -> Optional[Dict[str, Any]]:
+    """从环境变量组合生成完整 runtime patch。"""
+    patch: Dict[str, Any] = {}
+
+    for partial_patch in (
+        build_search_runtime_patch_from_env(),
+        build_discovery_runtime_patch_from_env(),
+    ):
+        if partial_patch is None:
+            continue
+        patch = merge_dicts(patch, partial_patch)
+
+    return patch or None
+
+
 
 def apply_patch_if_changed(patch: Dict[str, Any]) -> bool:
     """应用 patch；仅在配置实际变化时写盘。"""
@@ -130,24 +196,11 @@ def apply_patch_if_changed(patch: Dict[str, Any]) -> bool:
 
 def apply_runtime_patch_from_env() -> bool:
     """从环境变量生成并应用 runtime patch。"""
-    search_env = resolve_search_env_config()
-    if search_env is None:
-        logger.info("未提供完整的 search 配置，跳过 runtime config")
+    patch = build_runtime_patch_from_env()
+    if patch is None:
+        logger.info("未提供 search/discovery runtime 配置，跳过 runtime config")
         return False
 
-    if search_env["provider"] == SERPER_PLUGIN_ID:
-        if not SERPER_PLUGIN_DIR.exists():
-            raise FileNotFoundError(f"Serper plugin directory not found: {SERPER_PLUGIN_DIR}")
-        patch = build_serper_search_patch(
-            api_key=search_env["api_key"],
-            base_url=search_env["base_url"],
-        )
-    else:
-        patch = build_search_patch(
-            provider=search_env["provider"],
-            api_key=search_env["api_key"],
-            base_url=search_env["base_url"],
-        )
     return apply_patch_if_changed(patch)
 
 
