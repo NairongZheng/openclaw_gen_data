@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from src.fs_utils import make_tree_owner_writable, remove_tree
+
 logger = logging.getLogger(__name__)
 
 
@@ -145,8 +147,9 @@ def ensure_agent_state_dirs(agent_id: str, config_path: Optional[Path] = None) -
 def clone_workspace_template(template_workspace: Path, target_workspace: Path) -> None:
     """从模板 workspace 克隆到目标目录。"""
     if target_workspace.exists():
-        shutil.rmtree(target_workspace)
+        remove_tree(target_workspace)
     shutil.copytree(template_workspace, target_workspace)
+    make_tree_owner_writable(target_workspace)
 
 
 def configure_agent(
@@ -386,11 +389,11 @@ def delete_worker_agents(
 
         workspace = expected_agent_workspace(agent_id, str(root_dir))
         if workspace.exists():
-            shutil.rmtree(workspace)
+            remove_tree(workspace)
 
         state_dir = expected_agent_state_dir(agent_id, config_path)
         if state_dir.exists():
-            shutil.rmtree(state_dir)
+            remove_tree(state_dir)
 
     if deleted:
         config["agents"]["list"] = [

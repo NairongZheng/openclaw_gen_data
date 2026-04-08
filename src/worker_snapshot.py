@@ -4,6 +4,7 @@ import shutil
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from src.fs_utils import ensure_owner_writable, make_tree_owner_writable, remove_path, remove_tree
 from src.openclaw_wrapper import OpenClawWrapper, expected_agent_workspace
 from src.utils import load_json, save_json
 
@@ -38,7 +39,7 @@ def get_worker_pending_state_file(paths_config: Dict[str, Any], agent_name: str)
 
 def _copy_directory_contents(source_dir: Path, target_dir: Path) -> None:
     if target_dir.exists():
-        shutil.rmtree(target_dir)
+        remove_tree(target_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
 
     for item in source_dir.iterdir():
@@ -47,8 +48,10 @@ def _copy_directory_contents(source_dir: Path, target_dir: Path) -> None:
         destination = target_dir / item.name
         if item.is_dir():
             shutil.copytree(item, destination, symlinks=False)
+            make_tree_owner_writable(destination)
         else:
             shutil.copy2(item, destination)
+            ensure_owner_writable(destination)
 
 
 def snapshot_worker_workspace(agent_name: str, config: Dict[str, Any]) -> Path:
@@ -73,9 +76,9 @@ def restore_worker_workspace(agent_name: str, config: Dict[str, Any]) -> Optiona
             if item.name in _RUNTIME_SNAPSHOT_EXCLUDE_NAMES:
                 continue
             if item.is_dir():
-                shutil.rmtree(item)
+                remove_tree(item)
             else:
-                item.unlink()
+                remove_path(item)
     else:
         workspace.mkdir(parents=True, exist_ok=True)
 
@@ -83,8 +86,10 @@ def restore_worker_workspace(agent_name: str, config: Dict[str, Any]) -> Optiona
         destination = workspace / item.name
         if item.is_dir():
             shutil.copytree(item, destination, symlinks=False)
+            make_tree_owner_writable(destination)
         else:
             shutil.copy2(item, destination)
+            ensure_owner_writable(destination)
 
     return snapshot_dir
 
@@ -104,7 +109,7 @@ def save_worker_runtime_snapshot(
         raise RuntimeError(f"Agent {agent_name} 当前没有可保存的 session")
 
     if agent_snapshot_dir.exists():
-        shutil.rmtree(agent_snapshot_dir)
+        remove_tree(agent_snapshot_dir)
     sessions_snapshot_dir.mkdir(parents=True, exist_ok=True)
 
     workspace_snapshot_dir = snapshot_worker_workspace(agent_name, config)
@@ -178,4 +183,4 @@ def clear_worker_runtime_snapshot(agent_name: str, config: Dict[str, Any]) -> No
     agent_dir = get_worker_agent_snapshot_dir(paths_config, agent_name)
     for path in (workspace_dir, agent_dir):
         if path.exists():
-            shutil.rmtree(path)
+            remove_tree(path)

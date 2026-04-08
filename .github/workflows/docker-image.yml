@@ -20,7 +20,7 @@ on:
         description: Push arm64 image
         required: true
         type: boolean
-        default: true
+        default: false
       push_amd64:
         description: Push amd64 image
         required: true

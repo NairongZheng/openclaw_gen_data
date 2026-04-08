@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from src.fs_utils import ensure_owner_writable, make_tree_owner_writable, remove_path, remove_tree
 from src.openclaw_wrapper import OpenClawWrapper, expected_agent_workspace, resolve_workspace_root
 from src.worker_snapshot import resolve_template_snapshot_root
 
@@ -48,9 +49,9 @@ def restore_workspace_snapshot(agent_name: str, config: Dict[str, Any]) -> None:
                 continue
             try:
                 if item.is_dir():
-                    shutil.rmtree(item)
+                    remove_tree(item)
                 else:
-                    item.unlink()
+                    remove_path(item)
             except Exception as exc:
                 logger.warning("删除 %s 失败: %s", item, exc)
 
@@ -61,8 +62,10 @@ def restore_workspace_snapshot(agent_name: str, config: Dict[str, Any]) -> None:
         try:
             if item.is_dir():
                 shutil.copytree(item, destination, symlinks=False)
+                make_tree_owner_writable(destination)
             else:
                 shutil.copy2(item, destination)
+                ensure_owner_writable(destination)
         except Exception as exc:
             logger.warning("恢复 %s 失败: %s", item, exc)
 
@@ -116,7 +119,7 @@ def cleanup_agents(agent_ids: List[str], config: Dict[str, Any]) -> None:
                 lock_files = list(agent_dir.glob("*.lock"))
                 for lock_file in lock_files:
                     try:
-                        lock_file.unlink()
+                        remove_path(lock_file)
                         logger.debug("已删除锁文件: %s", lock_file.name)
                     except Exception as exc:
                         logger.warning("删除锁文件失败 %s: %s", lock_file, exc)

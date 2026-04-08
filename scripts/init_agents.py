@@ -32,6 +32,7 @@ from src.openclaw_wrapper import (
     OpenClawWrapper,
 )
 from src.config import load_config
+from src.fs_utils import ensure_owner_writable, make_tree_owner_writable, remove_path, remove_tree
 from src.worker_snapshot import (
     resolve_runtime_snapshot_root,
     resolve_template_snapshot_root,
@@ -105,11 +106,17 @@ def _delete_agent(agent_id: str, workspace_root: Optional[str] = None) -> None:
 
     workspace = expected_agent_workspace(agent_id, workspace_root)
     if workspace.exists():
-        shutil.rmtree(workspace, ignore_errors=True)
+        try:
+            remove_tree(workspace)
+        except Exception:
+            shutil.rmtree(workspace, ignore_errors=True)
 
     state_dir = expected_agent_state_dir(agent_id)
     if state_dir.exists():
-        shutil.rmtree(state_dir, ignore_errors=True)
+        try:
+            remove_tree(state_dir)
+        except Exception:
+            shutil.rmtree(state_dir, ignore_errors=True)
 
 
 def _create_probe_agent(agent_id: str, workspace_root: Optional[str]) -> Path:
@@ -166,8 +173,8 @@ def _terminate_process(process: subprocess.Popen[str], wait_timeout: float = 5.0
 
 def _trigger_probe_request(agent_id: str, timeout: int, capture_output_file: Path) -> List[Dict[str, Any]]:
     latest_file = capture_output_file.with_name(capture_output_file.stem + "_latest.json")
-    capture_output_file.unlink(missing_ok=True)
-    latest_file.unlink(missing_ok=True)
+    remove_path(capture_output_file)
+    remove_path(latest_file)
 
     cmd = [
         "openclaw",
@@ -455,7 +462,7 @@ def save_workspace_snapshot(agent_id: str, workspace_root: str, snapshot_dir: st
 
     # 清理旧快照
     if snapshot_path.exists():
-        shutil.rmtree(snapshot_path)
+        remove_tree(snapshot_path)
 
     # 复制 workspace 到快照目录（排除 .git）
     snapshot_path.mkdir(parents=True, exist_ok=True)
@@ -465,8 +472,10 @@ def save_workspace_snapshot(agent_id: str, workspace_root: str, snapshot_dir: st
         dest = snapshot_path / item.name
         if item.is_dir():
             shutil.copytree(item, dest, symlinks=False)
+            make_tree_owner_writable(dest)
         else:
             shutil.copy2(item, dest)
+            ensure_owner_writable(dest)
 
     logger.info(f"已保存 agent {agent_id} 的 workspace 快照到 {snapshot_path}")
 
@@ -482,7 +491,7 @@ def save_shared_workspace_snapshot(agent_id: str, workspace_root: str, snapshot_
     snapshot_path = Path(snapshot_dir) / SHARED_WORKSPACE_SNAPSHOT_NAME
 
     if snapshot_path.exists():
-        shutil.rmtree(snapshot_path)
+        remove_tree(snapshot_path)
 
     snapshot_path.mkdir(parents=True, exist_ok=True)
     for item in workspace.iterdir():
@@ -491,8 +500,10 @@ def save_shared_workspace_snapshot(agent_id: str, workspace_root: str, snapshot_
         dest = snapshot_path / item.name
         if item.is_dir():
             shutil.copytree(item, dest, symlinks=False)
+            make_tree_owner_writable(dest)
         else:
             shutil.copy2(item, dest)
+            ensure_owner_writable(dest)
 
     logger.info("已保存共享 workspace 模板快照到 %s", snapshot_path)
 
@@ -510,9 +521,9 @@ def remove_excluded_workspace_files(agent_id: str, workspace_root: str) -> None:
             continue
 
         if target.is_dir():
-            shutil.rmtree(target)
+            remove_tree(target)
         else:
-            target.unlink()
+            remove_path(target)
         removed_names.append(name)
 
     if removed_names:
@@ -564,11 +575,11 @@ def init_agents(
         snapshot_dir = resolve_template_snapshot_root(paths_config)
         if snapshot_dir.exists():
             logger.info("删除旧的 workspace 快照: %s", snapshot_dir)
-            shutil.rmtree(snapshot_dir)
+            remove_tree(snapshot_dir)
         agent_snapshot_dir = resolve_runtime_snapshot_root(paths_config)
         if agent_snapshot_dir.exists():
             logger.info("删除旧的 worker runtime 快照: %s", agent_snapshot_dir)
-            shutil.rmtree(agent_snapshot_dir)
+            remove_tree(agent_snapshot_dir)
 
     result = ensure_agents(
         num_agents=num_agents,
