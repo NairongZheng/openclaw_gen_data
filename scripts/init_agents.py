@@ -2,11 +2,14 @@
 import argparse
 import json
 import logging
+import socket
 import shutil
 import subprocess
-import tempfile
+import time
 from pathlib import Path
 from typing import Dict, List, Any, Optional
+from urllib.error import URLError
+from urllib.request import urlopen
 
 import os
 import sys
@@ -17,7 +20,17 @@ if '__file__' in globals():
 else:
     sys.path.insert(0, str(Path(os.getcwd())))
 
-from src.openclaw_wrapper import ensure_agents, resolve_workspace_root
+from src.openclaw_wrapper import (
+    configure_agent,
+    configure_global_provider,
+    ensure_agent_state_dirs,
+    ensure_agents,
+    expected_agent_state_dir,
+    expected_agent_workspace,
+    load_openclaw_config,
+    resolve_workspace_root,
+    OpenClawWrapper,
+)
 from src.config import load_config
 from src.worker_snapshot import (
     resolve_runtime_snapshot_root,
@@ -58,23 +71,242 @@ def resolve_init_settings(
 
 # ============== 工具生成相关函数 ==============
 
-def convert_to_openai_format(tools: List[Dict]) -> List[Dict[str, Any]]:
-    """将 tool-inspector 格式转换为 OpenAI format。
+def _find_free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        sock.listen(1)
+        return int(sock.getsockname()[1])
 
-    输入: [{"name": "...", "description": "...", "parameters": {...}, "source": "..."}]
-    输出: [{"type": "function", "function": {"name": "...", "description": "...", "parameters": {...}}}]
-    """
-    return [
-        {
-            "type": "function",
-            "function": {
-                "name": tool["name"],
-                "description": tool["description"],
-                "parameters": tool["parameters"]
-            }
-        }
-        for tool in tools
+
+def _wait_for_proxy_ready(port: int, timeout: float = 10.0) -> None:
+    deadline = time.time() + timeout
+    url = f"http://127.0.0.1:{port}/health"
+    last_error: Optional[Exception] = None
+    while time.time() < deadline:
+        try:
+            with urlopen(url, timeout=1.0) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+                if payload.get("status") == "ok":
+                    return
+        except (URLError, TimeoutError, json.JSONDecodeError) as exc:
+            last_error = exc
+            time.sleep(0.2)
+    raise RuntimeError(f"runtime tools proxy 未在预期时间内就绪: {last_error}")
+
+
+def _delete_agent(agent_id: str, workspace_root: Optional[str] = None) -> None:
+    result = subprocess.run(
+        ["openclaw", "agents", "delete", agent_id, "--force", "--json"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        logger.warning("删除 probe agent 失败，继续清理本地状态: %s", result.stderr)
+
+    workspace = expected_agent_workspace(agent_id, workspace_root)
+    if workspace.exists():
+        shutil.rmtree(workspace, ignore_errors=True)
+
+    state_dir = expected_agent_state_dir(agent_id)
+    if state_dir.exists():
+        shutil.rmtree(state_dir, ignore_errors=True)
+
+
+def _create_probe_agent(agent_id: str, workspace_root: Optional[str]) -> Path:
+    _delete_agent(agent_id, workspace_root)
+    workspace = expected_agent_workspace(agent_id, workspace_root)
+    workspace.mkdir(parents=True, exist_ok=True)
+
+    result = subprocess.run(
+        ["openclaw", "agents", "add", agent_id, "--non-interactive", "--workspace", str(workspace), "--json"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"创建 probe agent 失败: {result.stderr}")
+
+    ensure_agent_state_dirs(agent_id)
+    return workspace
+
+
+def _load_tools_from_capture(output_file: Path) -> List[Dict[str, Any]]:
+    latest_file = output_file.with_name(output_file.stem + "_latest.json")
+    if not latest_file.exists():
+        raise FileNotFoundError(f"未找到 probe tools 捕获文件: {latest_file}")
+
+    payload = json.loads(latest_file.read_text(encoding="utf-8"))
+    tools = payload.get("tools")
+    if not isinstance(tools, list) or not tools:
+        raise RuntimeError("probe 请求未捕获到任何 tools")
+    return tools
+
+
+def _wait_for_captured_tools(output_file: Path, timeout: float) -> List[Dict[str, Any]]:
+    deadline = time.time() + timeout
+    last_error: Optional[Exception] = None
+    while time.time() < deadline:
+        try:
+            return _load_tools_from_capture(output_file)
+        except (FileNotFoundError, json.JSONDecodeError, RuntimeError) as exc:
+            last_error = exc
+            time.sleep(0.2)
+    raise RuntimeError(f"在 {timeout:.1f}s 内未捕获到 probe tools: {last_error}")
+
+
+def _terminate_process(process: subprocess.Popen[str], wait_timeout: float = 5.0) -> None:
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=wait_timeout)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=wait_timeout)
+
+
+def _trigger_probe_request(agent_id: str, timeout: int, capture_output_file: Path) -> List[Dict[str, Any]]:
+    latest_file = capture_output_file.with_name(capture_output_file.stem + "_latest.json")
+    capture_output_file.unlink(missing_ok=True)
+    latest_file.unlink(missing_ok=True)
+
+    cmd = [
+        "openclaw",
+        "agent",
+        "--agent",
+        agent_id,
+        "--message",
+        "Reply with exactly OK. Do not use any tools.",
+        "--json",
+        "--thinking",
+        "off",
+        "--timeout",
+        str(min(timeout, 10)),
     ]
+
+    logger.info("以后台方式触发 probe 请求: agent=%s", agent_id)
+    process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+    try:
+        tools = _wait_for_captured_tools(capture_output_file, timeout=min(timeout, 15))
+        logger.info("probe 已捕获 tools，准备结束 CLI 子进程")
+        return tools
+    finally:
+        _terminate_process(process)
+        stdout_text, stderr_text = process.communicate()
+        if process.returncode not in (0, -15, 143, None):
+            logger.debug(
+                "probe CLI exited with code=%s stdout=%r stderr=%r",
+                process.returncode,
+                stdout_text,
+                stderr_text,
+            )
+
+
+def _capture_runtime_tools_via_probe(
+    source_agent_id: str,
+    project_root: Path,
+    timeout: int,
+) -> List[Dict[str, Any]]:
+    config = load_config()
+    openclaw_config = config.get("openclaw", {})
+    workspace_root = openclaw_config.get("workspace_root")
+    model_url = openclaw_config.get("model_url")
+    model_api_key = openclaw_config.get("model_api_key")
+    model = openclaw_config.get("model")
+    provider_api = openclaw_config.get("api", "anthropic-messages")
+    context_window = openclaw_config.get("context_window", 200000)
+    max_tokens = openclaw_config.get("max_tokens", 200000)
+    enable_thinking = openclaw_config.get("enable_thinking", True)
+
+    if not (model_url and model_api_key and model):
+        raise RuntimeError("openclaw.model_url/model_api_key/model 缺失，无法 probe 真实 tools")
+
+    openclaw_runtime_config = load_openclaw_config(default={"agents": {"list": []}})
+    source_agent_config = next(
+        (agent for agent in openclaw_runtime_config.get("agents", {}).get("list", []) if agent.get("id") == source_agent_id),
+        None,
+    )
+    if not source_agent_config:
+        raise RuntimeError(f"未找到源 agent 配置: {source_agent_id}")
+
+    probe_agent_id = f"{source_agent_id}-tools-probe"
+    capture_output_file = project_root / "output" / "tools" / f"runtime_probe_{source_agent_id}.jsonl"
+    port = _find_free_port()
+    proxy_cmd = [
+        sys.executable,
+        "-m",
+        "src.runtime_tools_proxy",
+        "--port",
+        str(port),
+        "--upstream-base-url",
+        model_url,
+        "--output-file",
+        str(capture_output_file),
+        "--capture-only",
+    ]
+
+    proxy_process = subprocess.Popen(
+        proxy_cmd,
+        cwd=str(project_root),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+
+    try:
+        _wait_for_proxy_ready(port)
+
+        local_proxy_url = f"http://127.0.0.1:{port}"
+        configure_global_provider(
+            provider_name="trajectory_provider",
+            base_url=local_proxy_url,
+            api_key=model_api_key,
+            model_id=model,
+            provider_api=provider_api,
+            context_window=context_window,
+            max_tokens=max_tokens,
+            reasoning=enable_thinking,
+        )
+
+        probe_workspace = _create_probe_agent(probe_agent_id, workspace_root)
+        configure_agent(
+            probe_agent_id,
+            workspace=str(probe_workspace),
+            tools_allow=(source_agent_config.get("tools") or {}).get("allow"),
+            model=source_agent_config.get("model"),
+            skills=source_agent_config.get("skills"),
+        )
+
+        tools = _trigger_probe_request(probe_agent_id, timeout, capture_output_file)
+        logger.info("probe 成功捕获真实 tools：agent=%s tools=%s", source_agent_id, len(tools))
+        return tools
+    finally:
+        configure_global_provider(
+            provider_name="trajectory_provider",
+            base_url=model_url,
+            api_key=model_api_key,
+            model_id=model,
+            provider_api=provider_api,
+            context_window=context_window,
+            max_tokens=max_tokens,
+            reasoning=enable_thinking,
+        )
+        try:
+            _delete_agent(probe_agent_id, workspace_root)
+        except Exception as exc:  # pragma: no cover
+            logger.warning("清理 probe agent 失败: %s", exc)
+        if proxy_process.poll() is None:
+            proxy_process.terminate()
+            try:
+                proxy_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proxy_process.kill()
+                proxy_process.wait(timeout=5)
 
 
 def generate_agent_tools(
@@ -90,43 +322,11 @@ def generate_agent_tools(
         timeout: 超时时间（秒）
 
     Returns:
-        OpenAI format 的工具列表
+        真实运行时请求中捕获到的 OpenAI format 工具列表
     """
-    script_path = project_root / "tools" / "tool-inspector" / "dump_tools.mjs"
-
-    if not script_path.exists():
-        raise FileNotFoundError(f"dump_tools.mjs 未找到: {script_path}")
-
-    # 创建临时文件接收输出
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as tmp:
-        tmp_path = tmp.name
-
-    try:
-        # 调用 dump_tools.mjs
-        result = subprocess.run(
-            ["node", str(script_path), "--agent", agent_id, "--output", tmp_path],
-            cwd=str(project_root),
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-
-        if result.returncode != 0:
-            raise RuntimeError(f"dump_tools.mjs 失败: {result.stderr}")
-
-        # 读取输出文件
-        with open(tmp_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-
-        # 转换格式
-        tools_openai = convert_to_openai_format(data.get("tools", []))
-
-        logger.info(f"成功为 agent {agent_id} 生成 {len(tools_openai)} 个工具")
-        return tools_openai
-
-    finally:
-        # 清理临时文件
-        Path(tmp_path).unlink(missing_ok=True)
+    tools_openai = _capture_runtime_tools_via_probe(agent_id, project_root, timeout)
+    logger.info("成功为 agent %s 捕获 %s 个真实工具", agent_id, len(tools_openai))
+    return tools_openai
 
 
 def generate_all_agents_tools(

@@ -1,0 +1,777 @@
+{
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "apply_patch",
+        "description": "Apply a patch to one or more files using the apply_patch format. The input should include *** Begin Patch and *** End Patch markers.",
+        "parameters": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string",
+              "description": "Patch content using the *** Begin Patch/End Patch format."
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "exec",
+        "description": "Execute shell commands with background continuation. Use yieldMs/background to continue later via process tool. Use pty=true for TTY-required commands (terminal UIs, coding agents).",
+        "parameters": {
+          "type": "object",
+          "required": [
+            "command"
+          ],
+          "properties": {
+            "command": {
+              "type": "string",
+              "description": "Shell command to execute"
+            },
+            "workdir": {
+              "type": "string",
+              "description": "Working directory (defaults to cwd)"
+            },
+            "env": {
+              "type": "object",
+              "patternProperties": {
+                "^(.*)$": {
+                  "type": "string"
+                }
+              }
+            },
+            "yieldMs": {
+              "type": "number",
+              "description": "Milliseconds to wait before backgrounding (default 10000)"
+            },
+            "background": {
+              "type": "boolean",
+              "description": "Run in background immediately"
+            },
+            "timeout": {
+              "type": "number",
+              "description": "Timeout in seconds (optional, kills process on expiry)"
+            },
+            "pty": {
+              "type": "boolean",
+              "description": "Run in a pseudo-terminal (PTY) when available (TTY-required CLIs, coding agents)"
+            },
+            "elevated": {
+              "type": "boolean",
+              "description": "Run on the host with elevated permissions (if allowed)"
+            },
+            "host": {
+              "type": "string",
+              "description": "Exec host (sandbox|gateway|node)."
+            },
+            "security": {
+              "type": "string",
+              "description": "Exec security mode (deny|allowlist|full)."
+            },
+            "ask": {
+              "type": "string",
+              "description": "Exec ask mode (off|on-miss|always)."
+            },
+            "node": {
+              "type": "string",
+              "description": "Node id/name for host=node."
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "process",
+        "description": "Manage running exec sessions: list, poll, log, write, send-keys, submit, paste, kill.",
+        "parameters": {
+          "type": "object",
+          "required": [
+            "action"
+          ],
+          "properties": {
+            "action": {
+              "type": "string",
+              "description": "Process action"
+            },
+            "sessionId": {
+              "type": "string",
+              "description": "Session id for actions other than list"
+            },
+            "data": {
+              "type": "string",
+              "description": "Data to write for write"
+            },
+            "keys": {
+              "type": "array",
+              "description": "Key tokens to send for send-keys",
+              "items": {
+                "type": "string"
+              }
+            },
+            "hex": {
+              "type": "array",
+              "description": "Hex bytes to send for send-keys",
+              "items": {
+                "type": "string"
+              }
+            },
+            "literal": {
+              "type": "string",
+              "description": "Literal string for send-keys"
+            },
+            "text": {
+              "type": "string",
+              "description": "Text to paste for paste"
+            },
+            "bracketed": {
+              "type": "boolean",
+              "description": "Wrap paste in bracketed mode"
+            },
+            "eof": {
+              "type": "boolean",
+              "description": "Close stdin after write"
+            },
+            "offset": {
+              "type": "number",
+              "description": "Log offset"
+            },
+            "limit": {
+              "type": "number",
+              "description": "Log length"
+            },
+            "timeout": {
+              "type": "number",
+              "description": "For poll: wait up to this many milliseconds before returning",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "agents_list",
+        "description": "List OpenClaw agent ids you can target with `sessions_spawn` when `runtime=\\",
+        "parameters": {
+          "type": "object",
+          "properties": {}
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "image",
+        "description": "Single image path or URL.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "prompt": {
+              "type": "string"
+            },
+            "image": {
+              "type": "string",
+              "description": "Single image path or URL."
+            },
+            "images": {
+              "type": "array",
+              "description": "Multiple image paths or URLs (up to maxImages, default 20).",
+              "items": {
+                "type": "string"
+              }
+            },
+            "model": {
+              "type": "string"
+            },
+            "maxBytesMb": {
+              "type": "number"
+            },
+            "maxImages": {
+              "type": "number"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "session_status",
+        "description": "Show a /status-equivalent session status card (usage + time + cost when available). Use for model-use questions (📊 session_status). Optional: set per-session model override (model=default resets overrides).",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "sessionKey": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "sessions_history",
+        "description": "Fetch message history for a session.",
+        "parameters": {
+          "type": "object",
+          "required": [
+            "sessionKey"
+          ],
+          "properties": {
+            "sessionKey": {
+              "type": "string"
+            },
+            "limit": {
+              "type": "number",
+              "minimum": 1
+            },
+            "includeTools": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "sessions_list",
+        "description": "List sessions with optional filters and last messages.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "kinds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "limit": {
+              "type": "number",
+              "minimum": 1
+            },
+            "activeMinutes": {
+              "type": "number",
+              "minimum": 1
+            },
+            "messageLimit": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "sessions_send",
+        "description": "Send a message into another session. Use sessionKey or label to identify the target.",
+        "parameters": {
+          "type": "object",
+          "required": [
+            "message"
+          ],
+          "properties": {
+            "sessionKey": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "agentId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "message": {
+              "type": "string"
+            },
+            "timeoutSeconds": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "tts",
+        "description": "Convert text to speech. Audio is delivered automatically from the tool result — reply with ${SILENT_REPLY_TOKEN} after a successful call to avoid duplicate messages.",
+        "parameters": {
+          "type": "object",
+          "required": [
+            "text"
+          ],
+          "properties": {
+            "text": {
+              "type": "string",
+              "description": "Text to convert to speech."
+            },
+            "channel": {
+              "type": "string",
+              "description": "Optional channel id to pick output format (e.g. telegram)."
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "web_fetch",
+        "description": "Fetch and extract readable content from a URL (HTML → markdown/text). Use for lightweight page access without browser automation.",
+        "parameters": {
+          "type": "object",
+          "required": [
+            "url"
+          ],
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "HTTP or HTTPS URL to fetch."
+            },
+            "extractMode": {
+              "type": "string",
+              "description": "Extraction mode (\"markdown\" or \"text\").",
+              "default": "markdown",
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "markdown"
+                },
+                {
+                  "type": "string",
+                  "const": "text"
+                }
+              ],
+              "enum": [
+                "markdown",
+                "text"
+              ]
+            },
+            "maxChars": {
+              "type": "number",
+              "description": "Maximum characters to return (truncates when exceeded).",
+              "minimum": 100
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "memory_search",
+        "description": "Mandatory recall step: semantically search MEMORY.md + memory/*.md (and optional session transcripts) before answering questions about prior work, decisions, dates, people, preferences, or todos; returns top snippets with path + lines. If response has disabled=true, memory retrieval is unavailable and should be surfaced to the user.",
+        "parameters": {
+          "type": "object",
+          "required": [
+            "query"
+          ],
+          "properties": {
+            "query": {
+              "type": "string"
+            },
+            "maxResults": {
+              "type": "number"
+            },
+            "minScore": {
+              "type": "number"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "memory_get",
+        "description": "Safe snippet read from MEMORY.md or memory/*.md with optional from/lines; use after memory_search to pull only the needed lines and keep context small.",
+        "parameters": {
+          "type": "object",
+          "required": [
+            "path"
+          ],
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "from": {
+              "type": "number"
+            },
+            "lines": {
+              "type": "number"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "web_search",
+        "description": "Search the web using Brave Search API.",
+        "parameters": {
+          "type": "object",
+          "required": [
+            "query"
+          ],
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Search query string."
+            },
+            "count": {
+              "type": "number",
+              "description": "Number of results (1-10).",
+              "minimum": 1,
+              "maximum": 10
+            },
+            "country": {
+              "type": "string",
+              "description": "2-letter country code (e.g. 'US', 'DE')."
+            },
+            "language": {
+              "type": "string",
+              "description": "ISO 639-1 language code (e.g. 'en', 'de')."
+            },
+            "freshness": {
+              "type": "string",
+              "description": "Filter by time: 'day', 'week', 'month', or 'year'."
+            },
+            "date_after": {
+              "type": "string",
+              "description": "Only results after this date (YYYY-MM-DD)."
+            },
+            "date_before": {
+              "type": "string",
+              "description": "Only results before this date (YYYY-MM-DD)."
+            },
+            "search_lang": {
+              "type": "string",
+              "description": "Brave language code (e.g. 'en', 'zh-hans')."
+            },
+            "ui_lang": {
+              "type": "string",
+              "description": "Locale code (e.g. 'en-US', 'de-DE')."
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "sessions_spawn",
+        "description": "Spawn an isolated session (runtime=\\",
+        "parameters": {
+          "type": "object",
+          "required": [
+            "task"
+          ],
+          "properties": {
+            "task": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "runtime": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "subagent"
+                },
+                {
+                  "type": "string",
+                  "const": "acp"
+                }
+              ]
+            },
+            "agentId": {
+              "type": "string"
+            },
+            "resumeSessionId": {
+              "type": "string",
+              "description": "Resume an existing ACP session by ID."
+            },
+            "model": {
+              "type": "string"
+            },
+            "thinking": {
+              "type": "string"
+            },
+            "cwd": {
+              "type": "string"
+            },
+            "runTimeoutSeconds": {
+              "type": "number",
+              "minimum": 0
+            },
+            "timeoutSeconds": {
+              "type": "number",
+              "minimum": 0
+            },
+            "thread": {
+              "type": "boolean"
+            },
+            "mode": {
+              "type": "string",
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "run"
+                },
+                {
+                  "type": "string",
+                  "const": "session"
+                }
+              ],
+              "enum": [
+                "run",
+                "session"
+              ]
+            },
+            "cleanup": {
+              "type": "string",
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "delete"
+                },
+                {
+                  "type": "string",
+                  "const": "keep"
+                }
+              ],
+              "enum": [
+                "delete",
+                "keep"
+              ]
+            },
+            "sandbox": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "inherit"
+                },
+                {
+                  "type": "string",
+                  "const": "require"
+                }
+              ]
+            },
+            "streamTo": {
+              "type": "string",
+              "const": "parent"
+            },
+            "attachments": {
+              "type": "array",
+              "maxItems": 50,
+              "items": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "content"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "content": {
+                    "type": "string"
+                  },
+                  "encoding": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "const": "utf8"
+                      },
+                      {
+                        "type": "string",
+                        "const": "base64"
+                      }
+                    ]
+                  },
+                  "mimeType": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "attachAs": {
+              "type": "object",
+              "properties": {
+                "mountPath": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "subagents",
+        "description": "List, kill, or steer spawned sub-agents for this requester session. Use this for sub-agent orchestration.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "list"
+                },
+                {
+                  "type": "string",
+                  "const": "kill"
+                },
+                {
+                  "type": "string",
+                  "const": "steer"
+                }
+              ],
+              "enum": [
+                "list",
+                "kill",
+                "steer"
+              ]
+            },
+            "target": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            },
+            "recentMinutes": {
+              "type": "number",
+              "minimum": 1
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read",
+        "description": "Read the contents of a file. Supports text files and images (jpg, png, gif, webp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.",
+        "parameters": {
+          "type": "object",
+          "required": [
+            "path"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Path to the file to read (relative or absolute)"
+            },
+            "offset": {
+              "type": "number",
+              "description": "Line number to start reading from (1-indexed)"
+            },
+            "limit": {
+              "type": "number",
+              "description": "Maximum number of lines to read"
+            },
+            "file_path": {
+              "type": "string",
+              "description": "Path to the file to read (relative or absolute)"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "write",
+        "description": "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
+        "parameters": {
+          "type": "object",
+          "required": [
+            "path",
+            "content"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Path to the file to write (relative or absolute)"
+            },
+            "content": {
+              "type": "string",
+              "description": "Content to write to the file"
+            },
+            "file_path": {
+              "type": "string",
+              "description": "Path to the file to write (relative or absolute)"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "edit",
+        "description": "Edit a file by replacing exact text. The oldText must match exactly (including whitespace). Use this for precise, surgical edits.",
+        "parameters": {
+          "type": "object",
+          "required": [
+            "path",
+            "oldText",
+            "newText"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Path to the file to edit (relative or absolute)"
+            },
+            "oldText": {
+              "type": "string",
+              "description": "Exact text to find and replace (must match exactly)"
+            },
+            "newText": {
+              "type": "string",
+              "description": "New text to replace the old text with"
+            },
+            "file_path": {
+              "type": "string",
+              "description": "Path to the file to edit (relative or absolute)"
+            },
+            "new_string": {
+              "type": "string",
+              "description": "New text to replace the old text with"
+            },
+            "old_string": {
+              "type": "string",
+              "description": "Exact text to find and replace (must match exactly)"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

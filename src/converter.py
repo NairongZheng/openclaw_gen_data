@@ -134,7 +134,7 @@ class DataConverter:
                         "type": "function",
                         "function": {
                             "name": tc["name"],
-                            "arguments": json.dumps(tc["arguments"])
+                            "arguments": tc["arguments"]
                         }
                     }
                     for tc in tool_calls_list

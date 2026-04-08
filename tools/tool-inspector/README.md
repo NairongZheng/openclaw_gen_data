@@ -2,6 +2,38 @@
 
 从 OpenClaw 运行时动态提取所有工具的完整定义（name + description + parameters JSON Schema），输出为 JSON 文件。
 
+这个目录目前同时包含两套思路：
+
+- **旧方式（保留）**：使用 `dump_tools.mjs` 做静态扫描/运行时插件注册拦截，导出一份工具定义。
+- **新推荐方式**：在 `init_agents.py --refresh-tools` 阶段，创建一个短生命周期的 probe agent，并通过一次真实请求捕获 OpenClaw 最终发给模型的 `tools`，再写入工具缓存。
+
+如果你的目标是做 **agent 轨迹采集 / 训练数据回放 / 工具定义对账**，推荐优先使用 **新推荐方式**，因为它更接近真实运行时请求。
+
+## 推荐方式：初始化阶段 probe 捕获真实 tools
+
+当前仓库的主链路已经不再依赖静态扫描结果作为唯一真值，而是在初始化时做一次真实请求校准：
+
+1. `scripts/init_agents.py --refresh-tools`
+2. 临时启动一个短生命周期本地 proxy
+3. 创建一个 `probe agent`
+4. 让该 agent 发起一次最小请求
+5. 捕获 OpenClaw **最终外发请求**中的 `tools`
+6. 将捕获结果写回工具缓存（如 `output/tools/openclaw_all_tools.json`）
+7. 清理 probe agent，并关闭 proxy
+
+这个方案的特点：
+
+- **优点**：拿到的是 OpenClaw 最终发给模型的 `tools`，比静态扫描更接近真实运行时
+- **风险控制**：proxy 只在初始化阶段短暂存在，不影响正式生成链路的稳定性
+- **适用场景**：工具 schema 经常变化、插件注册与静态提取结果不一致、需要尽量贴近真实请求时
+
+相关实现位于：
+
+- `scripts/init_agents.py`
+- `src/runtime_tools_proxy.py`
+
+## 旧方式：`dump_tools.mjs` 静态导出
+
 ## 前置条件
 
 - Node.js 18+
@@ -80,3 +112,5 @@ node dump_tools.mjs --all-agents
 
 - Skills（tmux、apple-reminders 等）是 Markdown 文档，不注册工具，不会出现在列表里
 - OpenClaw 升级后脚本自动适应，无需手动更新
+- `dump_tools.mjs` 现在更适合作为**离线检查 / 调试 / 对比工具**，而不是生成链路里的唯一真值来源
+- 如果你需要一份人工维护、长期稳定的标准工具定义，建议配合仓库中的 `all_tools.json` 一起使用

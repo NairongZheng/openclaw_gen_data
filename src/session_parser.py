@@ -1,6 +1,6 @@
 import json
 import re
-from typing import List, Dict, Optional
+from typing import Any, List, Dict, Optional
 
 
 class SessionParser:
@@ -84,9 +84,9 @@ class SessionParser:
             List[Dict]: 工具调用列表，每个元素包含:
                 - id: 工具调用ID
                 - name: 工具名称
-                - arguments: 工具参数（dict）
+                - arguments: 工具参数（优先保留结构化对象；若原始值是无法解析的字符串，则原样返回）
         """
-        tool_calls = []
+        tool_calls: List[Dict[str, Any]] = []
         for item in assistant_content:
             if item.get("type") == "toolCall":
                 arguments = item.get("arguments", {})
@@ -94,7 +94,7 @@ class SessionParser:
                     try:
                         arguments = json.loads(arguments)
                     except json.JSONDecodeError:
-                        arguments = {"raw": arguments}
+                        pass
                 tool_calls.append({
                     "id": item.get("id"),
                     "name": item.get("name"),

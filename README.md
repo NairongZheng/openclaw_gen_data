@@ -73,7 +73,12 @@ paths:
 python scripts/init_agents.py --num-agents 4 --force-recreate --refresh-tools
 ```
 
-4. 开始运行
+说明：
+
+- `--refresh-tools` 会在初始化阶段发起一次短生命周期 runtime probe，捕获 OpenClaw **真实发给模型** 的 `tools`
+- 更详细的工具提取说明见 [tools/tool-inspector/README.md](tools/tool-inspector/README.md)
+
+1. 开始运行
 
 ```bash
 python scripts/run_generation.py --concurrent 4
@@ -202,6 +207,7 @@ python scripts/run_generation.py --concurrent 4
 
 - 原始 session：保存在 [output/sessions](output/sessions)
 - middle format：保存在 [output/middle_format](output/middle_format)
+- 工具缓存与 probe 快照：保存在 [output/tools](output/tools)
 - 进度文件：保存在 [output/progress.json](output/progress.json)
 
 ## 相关文档
