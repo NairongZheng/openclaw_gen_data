@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -77,6 +79,39 @@ class ConverterTests(unittest.TestCase):
             '{"path": "/tmp/demo.txt",}',
         )
         self.assertIsInstance(tool_calls[0]["function"]["arguments"], str)
+
+    def test_shared_runtime_metadata_system_prompt_is_used_as_is(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cache_file = Path(tmp_dir) / "openclaw_runtime_metadata.json"
+            cache_file.write_text(
+                json.dumps(
+                    {
+                        "tools": [],
+                        "system_prompt": "Header\n\n## Skills (mandatory)\nExisting skill section\n\n## Documentation\nDoc section",
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            converter = DataConverter(runtime_metadata_cache_file=str(cache_file))
+            prompt = converter._build_system_prompt(
+                agent_name="gendata-worker-1",
+                workspace_root=None,
+                skills=[
+                    {
+                        "name": "demo-skill",
+                        "description": "do the thing",
+                        "path": "skills/demo.md",
+                    }
+                ],
+            )
+
+        self.assertEqual(
+            prompt,
+            "Header\n\n## Skills (mandatory)\nExisting skill section\n\n## Documentation\nDoc section",
+        )
+        self.assertIn("## Documentation", prompt)
 
 
 if __name__ == "__main__":

@@ -75,7 +75,9 @@ python scripts/init_agents.py --num-agents 4 --force-recreate --refresh-tools
 
 说明：
 
-- `--refresh-tools` 会在初始化阶段发起一次短生命周期 runtime probe，捕获 OpenClaw **真实发给模型** 的 `tools`
+- `--refresh-tools` 会在初始化阶段发起一次短生命周期 runtime probe，捕获 OpenClaw **真实发给模型** 的共享 runtime metadata（`tools` + `system_prompt`）
+- 默认写入 `output/worker_snapshots/runtime_metadata/runtime_metadata.json`
+- probe 调试快照会额外写入 `output/worker_snapshots/runtime_metadata/probe/`
 - 更详细的工具提取说明见 [tools/tool-inspector/README.md](tools/tool-inspector/README.md)
 
 1. 开始运行
@@ -207,11 +209,13 @@ python scripts/run_generation.py --concurrent 4
 
 - 原始 session：保存在 [output/sessions](output/sessions)
 - middle format：保存在 [output/middle_format](output/middle_format)
-- 工具缓存与 probe 快照：保存在 [output/tools](output/tools)
+- runtime metadata：保存在 [output/worker_snapshots/runtime_metadata/runtime_metadata.json](output/worker_snapshots/runtime_metadata/runtime_metadata.json)
+- probe 调试快照：保存在 [output/worker_snapshots/runtime_metadata/probe](output/worker_snapshots/runtime_metadata/probe)
 - 进度文件：保存在 [output/progress.json](output/progress.json)
 
 ## 相关文档
 
+- [docs/project-architecture-and-introduction.md](docs/project-architecture-and-introduction.md)：项目背景、架构、技术细节、难点与亮点的完整介绍
 - [docs/run-modes.md](docs/run-modes.md)：三种运行模式、输入文件和配置语义
 - [docs/search-and-deployment.md](docs/search-and-deployment.md)：搜索 provider、Serper、Docker、CI
 - [docs/raw_design.txt](docs/raw_design.txt)：原始设计记录

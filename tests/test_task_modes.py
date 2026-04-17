@@ -15,6 +15,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.generation_support import (
     build_session_batch_metadata,
+    load_agent_tools,
     resolve_append_query_enabled,
     select_append_query_task,
 )
@@ -139,6 +140,33 @@ class TaskModeTests(unittest.TestCase):
         self.assertEqual(metadata["intent_records"][0]["task_type"], "intent")
         self.assertEqual(metadata["intent_records"][1]["task_type"], "direct_query")
         self.assertEqual(metadata["appended_query"]["query_task_id"], "append_1")
+
+    def test_load_agent_tools_supports_shared_runtime_metadata(self) -> None:
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json", delete=False) as handle:
+            path = Path(handle.name)
+            handle.write(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "tools": [
+                            {
+                                "type": "function",
+                                "function": {"name": "read", "parameters": {"type": "object", "properties": {}}},
+                            }
+                        ],
+                        "system_prompt": "demo prompt",
+                    },
+                    ensure_ascii=False,
+                )
+            )
+
+        try:
+            tools = load_agent_tools(str(path), "gendata-worker-1")
+        finally:
+            path.unlink(missing_ok=True)
+
+        self.assertEqual(len(tools), 1)
+        self.assertEqual(tools[0]["function"]["name"], "read")
 
 
 if __name__ == "__main__":

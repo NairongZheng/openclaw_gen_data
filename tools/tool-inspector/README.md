@@ -5,11 +5,11 @@
 这个目录目前同时包含两套思路：
 
 - **旧方式（保留）**：使用 `dump_tools.mjs` 做静态扫描/运行时插件注册拦截，导出一份工具定义。
-- **新推荐方式**：在 `init_agents.py --refresh-tools` 阶段，创建一个短生命周期的 probe agent，并通过一次真实请求捕获 OpenClaw 最终发给模型的 `tools`，再写入工具缓存。
+- **新推荐方式**：在 `init_agents.py --refresh-tools` 阶段，创建一个短生命周期的 probe agent，并通过一次真实请求捕获 OpenClaw 最终发给模型的共享 runtime metadata（`tools` + `system_prompt`），再写入共享 metadata 文件。
 
 如果你的目标是做 **agent 轨迹采集 / 训练数据回放 / 工具定义对账**，推荐优先使用 **新推荐方式**，因为它更接近真实运行时请求。
 
-## 推荐方式：初始化阶段 probe 捕获真实 tools
+## 推荐方式：初始化阶段 probe 捕获真实 runtime metadata
 
 当前仓库的主链路已经不再依赖静态扫描结果作为唯一真值，而是在初始化时做一次真实请求校准：
 
@@ -17,13 +17,15 @@
 2. 临时启动一个短生命周期本地 proxy
 3. 创建一个 `probe agent`
 4. 让该 agent 发起一次最小请求
-5. 捕获 OpenClaw **最终外发请求**中的 `tools`
-6. 将捕获结果写回工具缓存（如 `output/tools/openclaw_all_tools.json`）
-7. 清理 probe agent，并关闭 proxy
+5. 捕获 OpenClaw **最终外发请求**中的共享 runtime metadata（`tools` + `system_prompt`）
+6. 将捕获结果写回共享 metadata 文件（如 `output/worker_snapshots/runtime_metadata/runtime_metadata.json`）
+7. 将 probe 调试快照保存在 `output/worker_snapshots/runtime_metadata/probe/`
+8. 清理 probe agent，并关闭 proxy
 
 这个方案的特点：
 
-- **优点**：拿到的是 OpenClaw 最终发给模型的 `tools`，比静态扫描更接近真实运行时
+- **优点**：拿到的是 OpenClaw 最终发给模型的共享 runtime metadata，比静态扫描更接近真实运行时
+- **调试隔离**：probe 快照只作为调试证据保留，单独放在 `worker_snapshots/runtime_metadata/probe/`，不再混入旧的 `output/tools`
 - **风险控制**：proxy 只在初始化阶段短暂存在，不影响正式生成链路的稳定性
 - **适用场景**：工具 schema 经常变化、插件注册与静态提取结果不一致、需要尽量贴近真实请求时
 

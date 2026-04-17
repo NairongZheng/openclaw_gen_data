@@ -6,7 +6,7 @@
 
 当前推荐通过 [scripts/start_generation_in_container.sh](../scripts/start_generation_in_container.sh) 在 `init_agents` 完成后、gateway 启动前 patch `~/.openclaw/openclaw.json`。
 
-### 工具缓存刷新
+### runtime metadata 刷新
 
 当你运行：
 
@@ -18,9 +18,9 @@ python scripts/init_agents.py --num-agents 4 --force-recreate --refresh-tools
 
 - 启动一个短生命周期本地 proxy
 - 创建 probe agent 并发起一次最小真实请求
-- 捕获 OpenClaw **最终外发请求**中的 `tools`
-- 将汇总结果写入 [output/tools/openclaw_all_tools.json](../output/tools/openclaw_all_tools.json)
-- 将最近一次 probe 快照写入 [output/tools](../output/tools) 下的 `runtime_probe_*_latest.json`
+- 捕获 OpenClaw **最终外发请求**中的共享 runtime metadata（`tools` + `system_prompt`）
+- 将汇总结果写入 [output/worker_snapshots/runtime_metadata/runtime_metadata.json](../output/worker_snapshots/runtime_metadata/runtime_metadata.json)
+- 将 probe 调试快照写入 [output/worker_snapshots/runtime_metadata/probe](../output/worker_snapshots/runtime_metadata/probe) 下的 `runtime_probe_*`
 
 这套流程已经替代了“仅依赖静态扫描导出工具”的旧主链路；`dump_tools.mjs` 仍可用于离线检查和对账，但不再是 `--refresh-tools` 的唯一来源。
 

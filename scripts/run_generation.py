@@ -38,6 +38,7 @@ from src.generation_support import (
     summarize_final_results,
 )
 from src.runtime_config import apply_runtime_patch_from_env
+from src.runtime_metadata_cache import resolve_runtime_metadata_cache_file
 from src.runtime_recovery import (
     backup_openclaw_config_to_output,
     looks_like_config_corruption_error,
@@ -373,7 +374,7 @@ def worker_loop(
     agent_name: str,
     task_queue: "queue.Queue[Dict[str, Any]]",
     config: Dict[str, Any],
-    tools_cache_file: str,
+    runtime_metadata_cache_file: str,
     progress: ProgressTracker,
     append_query_pool: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
@@ -383,7 +384,7 @@ def worker_loop(
         agent_name: worker agent 名称
         task_queue: 任务队列
         config: 配置
-        tools_cache_file: 工具缓存文件路径
+        runtime_metadata_cache_file: 运行时 metadata 缓存文件路径
         progress: 进度跟踪器
 
     Returns:
@@ -391,12 +392,10 @@ def worker_loop(
     """
 
     # 为当前 worker 的 agent 加载工具列表
-    worker_tools = load_agent_tools(tools_cache_file, agent_name)
+    worker_tools = load_agent_tools(runtime_metadata_cache_file, agent_name)
     llm = create_llm_client(config)
 
-    # 加载 system prompt 缓存
-    system_prompts_cache_file = str(Path(tools_cache_file).parent / "system_prompts_all_agents.json")
-    converter = DataConverter(system_prompts_cache_file=system_prompts_cache_file)
+    converter = DataConverter(runtime_metadata_cache_file=runtime_metadata_cache_file)
 
     openclaw = OpenClawWrapper(agent_name)
 
@@ -695,34 +694,19 @@ def main():
     # 注意：在 ensure_agents 完成后再备份 baseline，避免把异常状态保存进去。
     backup_openclaw_config_to_output(paths_config)
 
-    from scripts.init_agents import generate_all_agents_tools, capture_all_agents_system_prompts
+    from scripts.init_agents import capture_all_agents_runtime_metadata
     project_root = resolve_project_root()
-    tools_cache_file = paths_config["tools_cache_file"]
+    runtime_metadata_cache_file = resolve_runtime_metadata_cache_file(paths_config=paths_config)
     worker_ids = [f"{worker_prefix}-{i+1}" for i in range(num_workers)]
-    system_prompts_cache_file = str(Path(tools_cache_file).parent / "system_prompts_all_agents.json")
 
-    # 如果需要刷新工具列表，重新生成所有 agents 的工具
+    # 如果需要刷新运行时 metadata，重新捕获所有 agents 的 tools/system prompt
     if args.refresh_tools:
-        logger.info(f"刷新所有 {num_workers} 个 agents 的工具列表...")
+        logger.info("刷新所有 %s 个 agents 的运行时 metadata...", num_workers)
         try:
-            generate_all_agents_tools(worker_ids, tools_cache_file, project_root)
-            logger.info(f"✓ 工具列表已保存到 {tools_cache_file}")
+            capture_all_agents_runtime_metadata(worker_ids, runtime_metadata_cache_file, project_root)
+            logger.info("✓ 运行时 metadata 已保存到 %s", runtime_metadata_cache_file)
         except Exception as e:
-            logger.error(f"刷新工具列表失败: {e}")
-
-    # 每次启动都捕获 system prompts（通过 runtime probe），确保与运行时一致
-    logger.info(f"捕获所有 {num_workers} 个 agents 的 system prompt（通过 runtime probe）...")
-    try:
-        capture_all_agents_system_prompts(
-            worker_ids,
-            system_prompts_cache_file,
-            workspace_root=workspace_root,
-            project_root=project_root
-        )
-        logger.info(f"✓ System prompts 已保存到 {system_prompts_cache_file}")
-    except Exception as e:
-        logger.error(f"捕获 system prompts 失败: {e}")
-        sys.exit(1)
+            logger.error(f"刷新运行时 metadata 失败: {e}")
 
     intents_file = paths_config["intents_file"]
     logger.info(f"使用 intents 文件: {intents_file}")
@@ -789,7 +773,7 @@ def main():
                     agent_name,
                     task_queue,
                     config,
-                    paths_config["tools_cache_file"],
+                    runtime_metadata_cache_file,
                     progress,
                     append_query_pool,
                 )

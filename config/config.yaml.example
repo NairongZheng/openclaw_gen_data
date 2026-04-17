@@ -86,15 +86,10 @@ paths:
   progress_file: "output/progress.json"         # 进度文件
   logs_dir: "output/logs"                       # 日志目录
   
-  # 工具 catalog 缓存文件；按 agent 分组存储 {agent_id: [tools]}
-  # 使用 init_agents.py --refresh-tools 生成
-  # 注意：文件名可以是任意名称，实际配置使用 openclaw_all_tools.json
-  tools_cache_file: "output/tools/openclaw_all_tools.json"
-
-  # System prompt 缓存文件；按 agent 分组存储 {agent_id: system_prompt_text}
-  # 使用 run_generation.py --refresh-tools 时自动生成
-  # 确保训练数据中的 system prompt 与运行时一致
-  system_prompts_cache_file: "output/tools/system_prompts_all_agents.json"
+  # 运行时 metadata 缓存文件；共享存储本次 worker 初始化探测到的 tools + system prompt
+  # 使用 init_agents.py --refresh-tools 或 run_generation.py --refresh-tools 时自动生成
+  # 中间格式转换会优先读取这里的真实运行时 metadata；缺失时再退回 session 元数据 / workspace 动态构建
+  runtime_metadata_cache_file: "output/worker_snapshots/runtime_metadata/runtime_metadata.json"
 
   # Skills 目录路径
   skills_dir: "tools/skills/skills_collections"

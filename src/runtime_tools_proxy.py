@@ -1,4 +1,4 @@
-"""短生命周期 OpenAI-compatible proxy，用于捕获初始化 probe 请求里的真实 tools。"""
+"""短生命周期 OpenAI-compatible proxy，用于捕获初始化 probe 请求里的真实 runtime metadata。"""
 
 from __future__ import annotations
 
@@ -79,7 +79,7 @@ def append_capture_record(output_file: Path, record: Dict[str, Any]) -> None:
 class RuntimeToolsProxyHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     upstream_base_url: str = ""
-    output_file: Path = Path("runtime_probe_tools.jsonl")
+    output_file: Path = Path("runtime_probe_metadata.jsonl")
     request_timeout: float = 600.0
     capture_only: bool = False
 
@@ -249,7 +249,7 @@ def run_proxy(listen_host: str, port: int, upstream_base_url: str, output_file: 
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Capture real OpenClaw tools for a probe request")
+    parser = argparse.ArgumentParser(description="Capture real OpenClaw runtime metadata for a probe request")
     parser.add_argument("--listen-host", default="127.0.0.1")
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--upstream-base-url", required=True)

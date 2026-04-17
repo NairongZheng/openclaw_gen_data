@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 from src.converter import DataConverter
 from src.llm_client import LLMClient
 from src.openclaw_wrapper import OpenClawWrapper
+from src.runtime_metadata_cache import extract_tools_from_runtime_metadata, load_runtime_metadata_cache
 from src.utils import load_json, save_json
 
 logger = logging.getLogger(__name__)
@@ -130,16 +131,16 @@ def summarize_final_results(results: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def load_agent_tools(cache_file: str, agent_id: str) -> List[Dict[str, Any]]:
-    """从缓存文件加载特定 agent 的工具列表。"""
+    """从缓存文件加载 tools；优先读取共享 runtime metadata，兼容旧 per-agent tools cache。"""
     cache_path = Path(cache_file)
     if not cache_path.exists():
         logger.warning("工具缓存文件不存在: %s", cache_file)
         return []
 
     try:
-        data = load_json(str(cache_path))
-        if isinstance(data, dict) and agent_id in data:
-            tools = data[agent_id]
+        data = load_runtime_metadata_cache(str(cache_path))
+        tools = extract_tools_from_runtime_metadata(data)
+        if tools:
             logger.info("已加载 agent %s 的工具列表，共 %s 个工具", agent_id, len(tools))
             return tools
         logger.warning("未找到 agent %s 的工具列表", agent_id)

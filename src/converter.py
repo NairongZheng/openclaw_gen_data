@@ -8,6 +8,7 @@ from typing import Dict, Any, List, Optional
 from zoneinfo import ZoneInfo
 
 from src.openclaw_wrapper import expected_agent_workspace
+from src.runtime_metadata_cache import extract_system_prompt_from_runtime_metadata, load_runtime_metadata_cache
 from src.session_parser import SessionParser
 
 logger = logging.getLogger(__name__)
@@ -16,23 +17,23 @@ logger = logging.getLogger(__name__)
 class DataConverter:
     """数据格式转换器 - 生成符合 middle_format 规范的数据"""
 
-    def __init__(self, system_prompts_cache_file: Optional[str] = None):
+    def __init__(self, runtime_metadata_cache_file: Optional[str] = None):
         """初始化转换器
 
         Args:
-            system_prompts_cache_file: system prompt 缓存文件路径
+            runtime_metadata_cache_file: 运行时 metadata 缓存文件路径
         """
         self.parser = SessionParser()
-        self.system_prompts_cache: Dict[str, str] = {}
+        self.shared_system_prompt: str = ""
 
-        # 加载 system prompt 缓存
-        if system_prompts_cache_file and Path(system_prompts_cache_file).exists():
+        if runtime_metadata_cache_file and Path(runtime_metadata_cache_file).exists():
             try:
-                with open(system_prompts_cache_file, 'r', encoding='utf-8') as f:
-                    self.system_prompts_cache = json.load(f)
-                logger.info("已加载 system prompt 缓存，包含 %s 个 agents", len(self.system_prompts_cache))
+                payload = load_runtime_metadata_cache(str(runtime_metadata_cache_file))
+                if isinstance(payload.get("system_prompt"), str):
+                    self.shared_system_prompt = extract_system_prompt_from_runtime_metadata(payload)
+                    logger.info("已加载共享 runtime metadata system prompt")
             except Exception as exc:
-                logger.warning("加载 system prompt 缓存失败: %s", exc)
+                logger.warning("加载运行时 metadata 缓存失败: %s", exc)
 
     def convert_session_to_middle_format(
         self,
@@ -239,40 +240,13 @@ class DataConverter:
         if not agent_name:
             return ""
 
-        # 优先使用缓存的 system prompt（不含 skills）
-        cached_prompt = self.system_prompts_cache.get(agent_name)
-        if cached_prompt:
-            logger.debug("使用缓存的 system prompt for agent %s", agent_name)
-            # 如果有 skills，需要注入到缓存的 prompt 中
-            if skills:
-                return self._inject_skills_into_cached_prompt(cached_prompt, skills)
-            return cached_prompt
+        if self.shared_system_prompt:
+            logger.debug("使用共享 runtime metadata system prompt")
+            return self.shared_system_prompt
 
         # 缓存不存在，动态构建（fallback）
         logger.warning("未找到 agent %s 的缓存 system prompt，动态构建（可能与运行时不一致）", agent_name)
         return self._build_system_prompt_from_workspace(agent_name, workspace_root, skills)
-
-    def _inject_skills_into_cached_prompt(self, cached_prompt: str, skills: List[Dict[str, Any]]) -> str:
-        """将 skills 注入到缓存的 system prompt 中。"""
-        skills_section = self._render_skills_section(skills)
-        if not skills_section:
-            return cached_prompt
-
-        # 在 "## Documentation" 之前插入 skills section
-        lines = cached_prompt.split('\n')
-        doc_index = -1
-        for i, line in enumerate(lines):
-            if line.strip() == "## Documentation":
-                doc_index = i
-                break
-
-        if doc_index >= 0:
-            # 在 Documentation 之前插入
-            result_lines = lines[:doc_index] + [""] + skills_section + [""] + lines[doc_index:]
-            return '\n'.join(result_lines)
-        else:
-            # 找不到 Documentation，追加到末尾
-            return cached_prompt + "\n\n" + '\n'.join(skills_section)
 
     def _build_system_prompt_from_workspace(
         self,

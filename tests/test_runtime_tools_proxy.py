@@ -20,7 +20,10 @@ class RuntimeToolsProxyTests(unittest.TestCase):
     def test_build_capture_record_keeps_exact_tools(self) -> None:
         payload = {
             "model": "demo-model",
-            "messages": [{"role": "user", "content": "hi"}],
+            "messages": [
+                {"role": "system", "content": "system prompt"},
+                {"role": "user", "content": "hi"},
+            ],
             "tools": [
                 {
                     "type": "function",
@@ -39,6 +42,7 @@ class RuntimeToolsProxyTests(unittest.TestCase):
         self.assertEqual(record["tool_count"], 1)
         self.assertEqual(record["tool_names"], ["read"])
         self.assertEqual(record["tools"], payload["tools"])
+        self.assertEqual(record["system_prompt"], "system prompt")
 
     def test_append_capture_record_writes_jsonl_and_latest(self) -> None:
         record = {
