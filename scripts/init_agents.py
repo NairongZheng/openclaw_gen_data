@@ -643,7 +643,7 @@ def update_agent_tools(
 # ============== Workspace 管理函数 ==============
 
 def modify_agent_md(agent_id: str, workspace_root: str) -> None:
-    """修改 agent workspace 的 AGENTS.md，添加工作区限制指令。
+    """修改 agent workspace 的 AGENTS.md 和 SOUL.md，添加工作区限制和计划指令。
 
     Args:
         agent_id: agent 名称
@@ -652,29 +652,63 @@ def modify_agent_md(agent_id: str, workspace_root: str) -> None:
     from src.openclaw_wrapper import expected_agent_workspace
 
     workspace = expected_agent_workspace(agent_id, workspace_root)
-    agents_md = workspace / "AGENTS.md"
 
+    # 修改 AGENTS.md
+    agents_md = workspace / "AGENTS.md"
     if not agents_md.exists():
         logger.warning(f"Agent {agent_id} 的 AGENTS.md 不存在，跳过修改")
-        return
+    else:
+        # 读取现有内容
+        with open(agents_md, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
 
-    # 读取现有内容
-    with open(agents_md, 'r', encoding='utf-8') as f:
-        lines = f.readlines()
+        # 在第 3 行后插入新指令
+        if len(lines) >= 3:
+            # 检查是否已经添加过
+            if "only work in your workspace" not in ''.join(lines):
+                lines.insert(3, "And very important: only work in your workspace!!!\n\n")
 
-    # 在第 3 行后插入新指令
-    if len(lines) >= 3:
+                # 写回文件
+                with open(agents_md, 'w', encoding='utf-8') as f:
+                    f.writelines(lines)
+
+                logger.info(f"已修改 agent {agent_id} 的 AGENTS.md")
+            else:
+                logger.debug(f"Agent {agent_id} 的 AGENTS.md 已包含工作区指令")
+
+    # 修改 SOUL.md，添加"先计划再执行"指令
+    soul_md = workspace / "SOUL.md"
+    if not soul_md.exists():
+        logger.warning(f"Agent {agent_id} 的 SOUL.md 不存在，跳过修改")
+    else:
+        with open(soul_md, 'r', encoding='utf-8') as f:
+            content = f.read()
+
         # 检查是否已经添加过
-        if "only work in your workspace" not in ''.join(lines):
-            lines.insert(3, "And very important: only work in your workspace!!!\n\n")
-
-            # 写回文件
-            with open(agents_md, 'w', encoding='utf-8') as f:
-                f.writelines(lines)
-
-            logger.info(f"已修改 agent {agent_id} 的 AGENTS.md")
+        if "Plan before you act" not in content:
+            # 在 "## Core Truths" 后面插入新规则
+            plan_instruction = """
+**Plan before you act.** For non-trivial tasks, outline your approach before executing. Break down complex requests into steps, identify potential issues, and explain your reasoning. This helps catch mistakes early and builds trust.
+"""
+            # 找到 "## Core Truths" 后的第一个规则前插入
+            if "## Core Truths" in content:
+                parts = content.split("## Core Truths", 1)
+                if len(parts) == 2:
+                    # 在第一个 "**" 前插入
+                    core_parts = parts[1].split("**", 1)
+                    if len(core_parts) == 2:
+                        new_content = parts[0] + "## Core Truths" + core_parts[0] + plan_instruction + "\n**" + core_parts[1]
+                        with open(soul_md, 'w', encoding='utf-8') as f:
+                            f.write(new_content)
+                        logger.info(f"已修改 agent {agent_id} 的 SOUL.md，添加计划指令")
+                    else:
+                        logger.warning(f"Agent {agent_id} 的 SOUL.md 格式不符合预期，跳过修改")
+                else:
+                    logger.warning(f"Agent {agent_id} 的 SOUL.md 格式不符合预期，跳过修改")
+            else:
+                logger.warning(f"Agent {agent_id} 的 SOUL.md 中未找到 '## Core Truths'，跳过修改")
         else:
-            logger.debug(f"Agent {agent_id} 的 AGENTS.md 已包含工作区指令")
+            logger.debug(f"Agent {agent_id} 的 SOUL.md 已包含计划指令")
 
 
 def save_workspace_snapshot(agent_id: str, workspace_root: str, snapshot_dir: str) -> None:
