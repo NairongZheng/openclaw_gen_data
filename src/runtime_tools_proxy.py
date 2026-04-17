@@ -44,6 +44,14 @@ def build_capture_record(method: str, path: str, payload: Dict[str, Any]) -> Opt
             tool_names.append(name)
 
     messages = payload.get("messages")
+
+    # 提取 system prompt（第一条 system 消息）
+    system_prompt = None
+    if isinstance(messages, list) and len(messages) > 0:
+        first_msg = messages[0]
+        if isinstance(first_msg, dict) and first_msg.get("role") == "system":
+            system_prompt = first_msg.get("content")
+
     return {
         "captured_at": datetime.now(timezone.utc).isoformat(),
         "method": method,
@@ -54,6 +62,7 @@ def build_capture_record(method: str, path: str, payload: Dict[str, Any]) -> Opt
         "tool_names": tool_names,
         "message_count": len(messages) if isinstance(messages, list) else None,
         "tools": tools,
+        "system_prompt": system_prompt,  # 新增：捕获 system prompt
     }
 
 

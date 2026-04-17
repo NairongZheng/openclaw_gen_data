@@ -50,7 +50,8 @@ You are interacting with an AI agent to complete the following task (may contain
    - If the agent completed a step → acknowledge briefly and request the next step.
    - If the agent asks for information → provide a plausible answer (invent reasonable paths/values).
    - If the agent makes an error → point it out and ask it to fix it.
-   - If all sub-tasks are done → set `completed: true`.
+   - **Before marking complete**: When all sub-tasks appear done, ask the agent to double-check or verify the results one more time (e.g., "Looks good. Can you double-check everything is working correctly?"). This catches potential issues.
+   - After double-check passes → set `completed: true`.
 
 6. **User files.**
    - User files do not really exist at the start. If your task requires some existing files or the agent asks you for files, you should let the agent create these files in its own workspace (the agent knows where its workspace is, you don't need to specify the path) and then use them.
