@@ -91,5 +91,10 @@ paths:
   # 注意：文件名可以是任意名称，实际配置使用 openclaw_all_tools.json
   tools_cache_file: "output/tools/openclaw_all_tools.json"
 
+  # System prompt 缓存文件；按 agent 分组存储 {agent_id: system_prompt_text}
+  # 使用 run_generation.py --refresh-tools 时自动生成
+  # 确保训练数据中的 system prompt 与运行时一致
+  system_prompts_cache_file: "output/tools/system_prompts_all_agents.json"
+
   # Skills 目录路径
   skills_dir: "tools/skills/skills_collections"

@@ -265,6 +265,7 @@ def process_intent(
         max_turns = config["generation"].get("max_turns", 20)
         completed = False
         completion_reason = "reached_max_turns"
+        is_success = True  # 默认为成功，只有 user model 明确标记 is_success=false 时才改为 False
 
         for turn in range(max_turns):
             if _shutdown_requested.is_set() or _runtime_recovery_requested.is_set():
@@ -284,7 +285,9 @@ def process_intent(
                 return _build_interrupted_result(intent_id, agent_name, conversation_history, "runtime_recovery_requested")
 
             if llm_result.get("completed", False):
-                logger.info(f"[{agent_name}] 任务完成: {llm_result.get('reason', '')}")
+                is_success = llm_result.get("is_success", True)  # 从 user model 读取
+                status_label = "成功" if is_success else "失败"
+                logger.info(f"[{agent_name}] 任务完成({status_label}): {llm_result.get('reason', '')}")
                 completed = True
                 completion_reason = llm_result.get("reason", "completed")
                 break
@@ -333,10 +336,13 @@ def process_intent(
         if not session_info:
             raise RuntimeError(f"[{agent_name}] 未找到 session 信息，无法归档")
 
-        logger.info(f"[{agent_name}] ✓ Intent {intent_id} 处理完成")
+        # 根据 is_success 决定最终状态
+        final_status = "success" if is_success else "failed"
+
+        logger.info(f"[{agent_name}] ✓ Intent {intent_id} 处理完成 (status={final_status})")
         return {
             "intent_id": str(intent_id),
-            "status": "success",
+            "status": final_status,
             "agent_name": agent_name,
             "intent_data": intent_data,
             "session_info": session_info,
@@ -346,6 +352,7 @@ def process_intent(
             "completion_reason": completion_reason,
             "turns": len(conversation_history) // 2,
             "task_type": task_type,
+            "is_success": is_success,
         }
 
     except Exception as e:
@@ -386,7 +393,11 @@ def worker_loop(
     # 为当前 worker 的 agent 加载工具列表
     worker_tools = load_agent_tools(tools_cache_file, agent_name)
     llm = create_llm_client(config)
-    converter = DataConverter()
+
+    # 加载 system prompt 缓存
+    system_prompts_cache_file = str(Path(tools_cache_file).parent / "system_prompts_all_agents.json")
+    converter = DataConverter(system_prompts_cache_file=system_prompts_cache_file)
+
     openclaw = OpenClawWrapper(agent_name)
 
     if not worker_tools:
@@ -684,20 +695,34 @@ def main():
     # 注意：在 ensure_agents 完成后再备份 baseline，避免把异常状态保存进去。
     backup_openclaw_config_to_output(paths_config)
 
+    from scripts.init_agents import generate_all_agents_tools, capture_all_agents_system_prompts
+    project_root = resolve_project_root()
+    tools_cache_file = paths_config["tools_cache_file"]
+    worker_ids = [f"{worker_prefix}-{i+1}" for i in range(num_workers)]
+    system_prompts_cache_file = str(Path(tools_cache_file).parent / "system_prompts_all_agents.json")
+
     # 如果需要刷新工具列表，重新生成所有 agents 的工具
     if args.refresh_tools:
-        from scripts.init_agents import generate_all_agents_tools
-        project_root = resolve_project_root()
-        tools_cache_file = paths_config["tools_cache_file"]
-        worker_ids = [f"{worker_prefix}-{i+1}" for i in range(num_workers)]
-
         logger.info(f"刷新所有 {num_workers} 个 agents 的工具列表...")
         try:
             generate_all_agents_tools(worker_ids, tools_cache_file, project_root)
             logger.info(f"✓ 工具列表已保存到 {tools_cache_file}")
         except Exception as e:
             logger.error(f"刷新工具列表失败: {e}")
-            # 继续执行，使用现有缓存或退回 session 元数据
+
+    # 每次启动都捕获 system prompts（通过 runtime probe），确保与运行时一致
+    logger.info(f"捕获所有 {num_workers} 个 agents 的 system prompt（通过 runtime probe）...")
+    try:
+        capture_all_agents_system_prompts(
+            worker_ids,
+            system_prompts_cache_file,
+            workspace_root=workspace_root,
+            project_root=project_root
+        )
+        logger.info(f"✓ System prompts 已保存到 {system_prompts_cache_file}")
+    except Exception as e:
+        logger.error(f"捕获 system prompts 失败: {e}")
+        sys.exit(1)
 
     intents_file = paths_config["intents_file"]
     logger.info(f"使用 intents 文件: {intents_file}")
