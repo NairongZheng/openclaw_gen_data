@@ -15,7 +15,9 @@ variables:
   IMAGE_TAG:
     value: "manual"
     description: "发布 tag 前缀；最终会拼成 IMAGE_TAG-分支名-架构"
-  OPENCLAW_VERSION: "2026.3.24"
+  OPENCLAW_VERSION:
+    value: "2026.3.24"
+    description: "Dockerfile 中安装的 OpenClaw 版本"
   PUSH_AMD64:
     value: "true"
     options:
