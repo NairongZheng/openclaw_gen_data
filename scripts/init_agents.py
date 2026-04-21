@@ -209,7 +209,7 @@ def _trigger_probe_request(agent_id: str, timeout: int, capture_output_file: Pat
     )
 
     try:
-        capture_payload = _wait_for_probe_capture(capture_output_file, timeout=min(timeout, 15))
+        capture_payload = _wait_for_probe_capture(capture_output_file, timeout=min(timeout, 60))
         logger.info("probe 已捕获 tools/system prompt，准备结束 CLI 子进程")
         return capture_payload
     finally:

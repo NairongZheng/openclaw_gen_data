@@ -1,0 +1,144 @@
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH == "master"'
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+
+stages:
+  - build_check
+  - publish
+
+variables:
+  REGISTRY: ""
+  IMAGE_NAME: "openclaw_datagen"
+  IMAGE_TAG:
+    value: "manual"
+    description: "发布 tag 前缀；最终会拼成 IMAGE_TAG-分支名-架构"
+  OPENCLAW_VERSION: "2026.3.24"
+  PUSH_AMD64:
+    value: "true"
+    options:
+      - "true"
+      - "false"
+    description: "是否发布 amd64 镜像"
+  PUSH_ARM64:
+    value: "false"
+    options:
+      - "true"
+      - "false"
+    description: "是否发布 arm64 镜像"
+  ENABLE_ARM64_CHECK: "false"
+  SECONDARY_REGISTRY: ""
+  SECONDARY_IMAGE_NAME: "openclaw_datagen"
+
+default:
+  before_script:
+    - |-
+      #!/bin/bash
+      set -euo pipefail
+
+      docker version
+      docker info
+
+      if [[ -n "${REGISTRY:-}" ]]; then
+        if [[ -z "${REGISTRY_USER:-}" || -z "${REGISTRY_PASSWORD:-}" ]]; then
+          echo "REGISTRY is set, but REGISTRY_USER or REGISTRY_PASSWORD is missing"
+          exit 1
+        fi
+        echo "${REGISTRY_PASSWORD}" | docker login -u "${REGISTRY_USER}" --password-stdin "${REGISTRY}"
+      fi
+
+      if [[ -n "${SECONDARY_REGISTRY:-}" ]]; then
+        if [[ -z "${SECONDARY_REGISTRY_USER:-}" || -z "${SECONDARY_REGISTRY_PASSWORD:-}" ]]; then
+          echo "SECONDARY_REGISTRY is set, but SECONDARY_REGISTRY_USER or SECONDARY_REGISTRY_PASSWORD is missing"
+          exit 1
+        fi
+        echo "${SECONDARY_REGISTRY_PASSWORD}" | docker login -u "${SECONDARY_REGISTRY_USER}" --password-stdin "${SECONDARY_REGISTRY}"
+      fi
+
+.build-check-template:
+  stage: build_check
+  script:
+    - |-
+      #!/bin/bash
+      set -euxo pipefail
+
+      docker build \
+        -f ./Dockerfile \
+        --platform "${TARGET_PLATFORM}" \
+        --build-arg OPENCLAW_VERSION="${OPENCLAW_VERSION}" \
+        -t "local/${IMAGE_NAME}:${TARGET_ARCH}-check" \
+        .
+
+.publish-template:
+  stage: publish
+  script:
+    - |-
+      #!/bin/bash
+      set -euxo pipefail
+
+      if [[ -z "${REGISTRY:-}" ]]; then
+        echo "REGISTRY is required for publish jobs"
+        exit 1
+      fi
+
+      BRANCH_TAG="$(printf '%s' "${CI_COMMIT_REF_NAME}" | tr '/:@ ' '-' | tr -cd '[:alnum:]._-')"
+      FINAL_TAG="${IMAGE_TAG}-${BRANCH_TAG}-${TARGET_ARCH}"
+      PRIMARY_IMAGE="${REGISTRY}/${IMAGE_NAME}:${FINAL_TAG}"
+
+      docker build \
+        -f ./Dockerfile \
+        --platform "${TARGET_PLATFORM}" \
+        --build-arg OPENCLAW_VERSION="${OPENCLAW_VERSION}" \
+        -t "${PRIMARY_IMAGE}" \
+        .
+
+      docker push "${PRIMARY_IMAGE}"
+
+      if [[ -n "${SECONDARY_REGISTRY:-}" ]]; then
+        SECONDARY_NAME="${SECONDARY_IMAGE_NAME:-${IMAGE_NAME}}"
+        SECONDARY_IMAGE="${SECONDARY_REGISTRY}/${SECONDARY_NAME}:${FINAL_TAG}"
+        docker tag "${PRIMARY_IMAGE}" "${SECONDARY_IMAGE}"
+        docker push "${SECONDARY_IMAGE}"
+      fi
+
+build-check-amd64:
+  extends: .build-check-template
+  variables:
+    TARGET_PLATFORM: linux/amd64
+    TARGET_ARCH: amd64
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH == "master"'
+
+build-check-arm64:
+  extends: .build-check-template
+  tags:
+    - arm64
+  variables:
+    TARGET_PLATFORM: linux/arm64
+    TARGET_ARCH: arm64
+  rules:
+    - if: '$ENABLE_ARM64_CHECK == "true" && $CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$ENABLE_ARM64_CHECK == "true" && $CI_COMMIT_BRANCH == "main"'
+    - if: '$ENABLE_ARM64_CHECK == "true" && $CI_COMMIT_BRANCH == "master"'
+
+publish-registry-amd64:
+  extends: .publish-template
+  variables:
+    TARGET_PLATFORM: linux/amd64
+    TARGET_ARCH: amd64
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "web" && $PUSH_AMD64 == "true"'
+
+publish-registry-arm64:
+  extends: .publish-template
+  tags:
+    - arm64
+  variables:
+    TARGET_PLATFORM: linux/arm64
+    TARGET_ARCH: arm64
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "web" && $PUSH_ARM64 == "true"'
