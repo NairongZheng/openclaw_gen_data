@@ -121,16 +121,15 @@ class SerperPluginStaticTests(unittest.TestCase):
 
         self.assertIsNone(resolved)
 
-    def test_build_serper_search_patch_contains_plugin_load_path(self) -> None:
+    def test_build_serper_search_patch_injects_api_credentials(self) -> None:
         patch = runtime_config.build_serper_search_patch(
             api_key="test-key",
             base_url="https://google.serper.dev",
         )
 
-        self.assertEqual(patch["tools"]["web"]["search"]["provider"], "serper")
-        self.assertTrue(patch["tools"]["web"]["fetch"]["enabled"])
-        self.assertEqual(patch["plugins"]["allow"], ["serper"])
-        self.assertEqual(patch["plugins"]["load"]["paths"], [str(runtime_config.SERPER_PLUGIN_DIR)])
+        self.assertNotIn("tools", patch)
+        self.assertNotIn("allow", patch.get("plugins", {}))
+        self.assertNotIn("load", patch.get("plugins", {}))
         self.assertTrue(patch["plugins"]["entries"]["serper"]["enabled"])
         self.assertEqual(
             patch["plugins"]["entries"]["serper"]["config"]["webSearch"]["apiKey"],
@@ -148,7 +147,7 @@ class SerperPluginStaticTests(unittest.TestCase):
             patch = runtime_config.build_search_runtime_patch_from_env()
 
         assert patch is not None
-        self.assertEqual(patch["tools"]["web"]["search"]["provider"], "serper")
+        self.assertIn("plugins", patch)
         self.assertNotIn("discovery", patch)
 
     def test_build_discovery_runtime_patch_from_env_is_independent(self) -> None:
@@ -177,12 +176,14 @@ class SerperPluginStaticTests(unittest.TestCase):
 
             saved = openclaw_wrapper.load_openclaw_config(config_path=config_path)
 
-        self.assertEqual(saved["tools"]["web"]["search"]["provider"], "serper")
-        self.assertEqual(saved["plugins"]["allow"], ["serper"])
-        self.assertEqual(saved["plugins"]["load"]["paths"], [str(runtime_config.SERPER_PLUGIN_DIR)])
+        self.assertNotIn("load", saved.get("plugins", {}))
         self.assertEqual(
             saved["plugins"]["entries"]["serper"]["config"]["webSearch"]["baseUrl"],
             "https://google.serper.dev",
+        )
+        self.assertEqual(
+            saved["plugins"]["entries"]["serper"]["config"]["webSearch"]["apiKey"],
+            "test-key",
         )
 
     def test_apply_runtime_patch_can_write_mdns_mode_without_search_env(self) -> None:

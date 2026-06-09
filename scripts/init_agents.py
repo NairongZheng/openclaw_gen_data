@@ -63,8 +63,16 @@ def resolve_init_settings(
     """合并 CLI 参数和配置文件，得到 init_agents 的有效设置。"""
     openclaw_config = config.get("openclaw", {})
     paths_config = config.get("paths", {})
+    raw_num_agents = cli_num_agents if cli_num_agents is not None else openclaw_config.get("num_workers", 3)
+    try:
+        num_agents = int(raw_num_agents)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"openclaw.num_workers 必须是整数，当前值: {raw_num_agents!r}") from exc
+    if num_agents <= 0:
+        raise ValueError(f"openclaw.num_workers 必须大于 0，当前值: {num_agents}")
+
     return {
-        "num_agents": cli_num_agents or openclaw_config.get("num_workers", 3),
+        "num_agents": num_agents,
         "worker_prefix": cli_worker_prefix or openclaw_config.get("worker_prefix", "gendata-worker"),
         "workspace_root": cli_workspace_root or openclaw_config.get("workspace_root"),
         "runtime_metadata_output_file": resolve_runtime_metadata_cache_file(paths_config=paths_config),

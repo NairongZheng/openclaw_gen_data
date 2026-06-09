@@ -56,6 +56,7 @@ export OPENCLAW_DISCOVERY_MDNS_MODE
 CONDA_DIR="${CONDA_DIR:-/opt/miniconda3}"
 CONDA_ENV_NAME="${CONDA_ENV_NAME:-dev}"
 GATEWAY_LOG="${OPENCLAW_GATEWAY_LOG:-/root/.openclaw/gateway.log}"
+GATEWAY_READY_TIMEOUT="${OPENCLAW_GATEWAY_READY_TIMEOUT:-30}"
 WORK_DIR="/workspace"
 
 # 让 Python stdout/stderr 立即刷新，便于容器日志实时查看
@@ -84,6 +85,34 @@ ensure_openclaw_runtime_config() {
   return 1
 }
 
+wait_for_gateway_ready() {
+  local timeout_seconds="${1:-30}"
+  local started_at
+  started_at="$(date +%s)"
+
+  while true; do
+    if openclaw gateway status >/dev/null 2>&1; then
+      echo "[start] gateway is ready"
+      return 0
+    fi
+
+    if (( $(date +%s) - started_at >= timeout_seconds )); then
+      echo "[start] gateway did not become ready within ${timeout_seconds}s" >&2
+      return 1
+    fi
+
+    sleep 1
+  done
+}
+
+restart_gateway() {
+  mkdir -p "$(dirname "${GATEWAY_LOG}")"
+  pkill -f "openclaw gateway run" || true
+  sleep 1
+  nohup openclaw gateway run >"${GATEWAY_LOG}" 2>&1 &
+  echo "[start] gateway restarted, log=${GATEWAY_LOG}"
+}
+
 cd "${WORK_DIR}"
 
 # 1) 注入项目配置（可选）
@@ -105,36 +134,36 @@ rm -rf ./output
 ln -s "${OUTPUT_DIR}" ./output
 echo "[start] output -> ${OUTPUT_DIR}"
 
-# 3) 初始化 agents
+# 3) 先应用 runtime config，避免 refresh-tools / 后续 gateway 启动读取到旧配置
+RUNTIME_CONFIG_CHANGED=0
+if ensure_openclaw_runtime_config; then
+  RUNTIME_CONFIG_CHANGED=1
+fi
+
+# 4) 初始化 agents（此时 refresh-tools 将基于最新 runtime config 捕获）
 "${CONDA_DIR}/bin/conda" run --no-capture-output -n "${CONDA_ENV_NAME}" \
   python scripts/init_agents.py \
     --num-agents "${CONCURRENT_NUM}" \
     --force-recreate \
     --refresh-tools
 
-RUNTIME_CONFIG_CHANGED=0
-if ensure_openclaw_runtime_config; then
-  RUNTIME_CONFIG_CHANGED=1
-fi
-
-# 4) 确保 gateway 在运行
-mkdir -p "$(dirname "${GATEWAY_LOG}")"
+# 5) 确保 gateway 在运行且使用最新配置
 if ! pgrep -fa "openclaw gateway run" >/dev/null 2>&1; then
+  mkdir -p "$(dirname "${GATEWAY_LOG}")"
   nohup openclaw gateway run >"${GATEWAY_LOG}" 2>&1 &
   echo "[start] gateway started, log=${GATEWAY_LOG}"
-  sleep 2
+elif [[ "${RUNTIME_CONFIG_CHANGED}" == "1" ]]; then
+  restart_gateway
 else
-  if [[ "${RUNTIME_CONFIG_CHANGED}" == "1" ]]; then
-    pkill -f "openclaw gateway run" || true
-    nohup openclaw gateway run >"${GATEWAY_LOG}" 2>&1 &
-    echo "[start] gateway restarted to apply runtime config, log=${GATEWAY_LOG}"
-    sleep 2
-  else
-    echo "[start] gateway already running"
-  fi
+  echo "[start] gateway already running"
 fi
 
-# 5) 运行数据生成
+wait_for_gateway_ready "${GATEWAY_READY_TIMEOUT}" || {
+  echo "[start] gateway did not become ready within ${GATEWAY_READY_TIMEOUT}s, aborting" >&2
+  exit 1
+}
+
+# 6) 运行数据生成
 RUN_GENERATION_CMD=(
   "${CONDA_DIR}/bin/conda" run --no-capture-output -n "${CONDA_ENV_NAME}"
   python scripts/run_generation.py

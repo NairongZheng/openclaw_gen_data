@@ -10,7 +10,6 @@
 """
 import logging
 import os
-from pathlib import Path
 from typing import Any, Dict, Optional
 
 from src.openclaw_wrapper import load_openclaw_config, save_openclaw_config
@@ -22,7 +21,6 @@ logger = logging.getLogger(__name__)
 
 RUNTIME_CONFIG_STATUS_PREFIX = "OPENCLAW_RUNTIME_CONFIG_CHANGED="
 SERPER_PLUGIN_ID = "serper"
-SERPER_PLUGIN_DIR = Path(__file__).resolve().parent.parent / "openclaw_plugins" / SERPER_PLUGIN_ID
 
 
 def build_search_patch(provider: str, api_key: str, base_url: str) -> Dict[str, Any]:
@@ -47,24 +45,9 @@ def build_search_patch(provider: str, api_key: str, base_url: str) -> Dict[str, 
 
 
 def build_serper_search_patch(api_key: str, base_url: str) -> Dict[str, Any]:
-    """为 Serper 外部插件构造 OpenClaw runtime patch。"""
+    """注入 Serper 插件的运行时 API 凭证（插件安装/启用已由 Dockerfile 处理）。"""
     return {
-        "tools": {
-            "web": {
-                "fetch": {
-                    "enabled": True,
-                },
-                "search": {
-                    "enabled": True,
-                    "provider": SERPER_PLUGIN_ID,
-                },
-            }
-        },
         "plugins": {
-            "allow": [SERPER_PLUGIN_ID],
-            "load": {
-                "paths": [str(SERPER_PLUGIN_DIR)],
-            },
             "entries": {
                 SERPER_PLUGIN_ID: {
                     "enabled": True,
@@ -125,8 +108,6 @@ def build_search_runtime_patch_from_env() -> Optional[Dict[str, Any]]:
         return None
 
     if search_env["provider"] == SERPER_PLUGIN_ID:
-        if not SERPER_PLUGIN_DIR.exists():
-            raise FileNotFoundError(f"Serper plugin directory not found: {SERPER_PLUGIN_DIR}")
         return build_serper_search_patch(
             api_key=search_env["api_key"],
             base_url=search_env["base_url"],

@@ -112,6 +112,12 @@ EOF
 
 COPY . /workspace
 RUN chmod +x /workspace/scripts/start_generation_in_container.sh
+RUN openclaw plugins install /workspace/openclaw_plugins/serper \
+    && openclaw plugins enable serper \
+    && openclaw config set plugins.allow '["serper"]' --strict-json \
+    && openclaw config set tools.web.fetch.enabled true --strict-json \
+    && openclaw config set tools.web.search.enabled true --strict-json \
+    && openclaw config set tools.web.search.provider serper
 
 WORKDIR /workspace
 
