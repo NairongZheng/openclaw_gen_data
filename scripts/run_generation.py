@@ -673,8 +673,6 @@ def main():
         num_agents=num_workers,
         worker_prefix=worker_prefix,
         workspace_root=workspace_root,
-        add_tools=True,  # 生成数据时启用工具白名单
-        tools_allow=config["openclaw"].get("worker_tools_allow"),
     )
     logger.info(
         "worker agents 就绪，已存在 %s 个，新建 %s 个，已删除 %s 个",
