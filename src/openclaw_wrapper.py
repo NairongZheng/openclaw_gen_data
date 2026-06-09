@@ -404,6 +404,21 @@ def ensure_agents(
         if deleted:
             logger.info(f"已删除 {len(deleted)} 个 agents: {', '.join(deleted)}")
 
+        # OpenClaw 2026.6.1+ 会把缩小后的 openclaw.json 与 .last-good 对比，
+        # 大幅缩小（删除 agent 后正常现象）会被误判为 config 损坏。
+        # 把当前 config 同步到 .last-good，告知 OpenClaw 这是预期状态。
+        last_good = DEFAULT_OPENCLAW_CONFIG_PATH.parent / "openclaw.json.last-good"
+        if DEFAULT_OPENCLAW_CONFIG_PATH.exists():
+            shutil.copy2(str(DEFAULT_OPENCLAW_CONFIG_PATH), str(last_good))
+            logger.info("已更新 openclaw.json.last-good")
+
+        # OpenClaw 2026.6.1+ 在 workspace-attestations/ 存储工作区存在证明，
+        # force_recreate 删除 workspace 后需清掉对应 attestation，否则触发 WorkspaceVanishedError。
+        attestation_dir = DEFAULT_OPENCLAW_CONFIG_PATH.parent / "workspace-attestations"
+        if attestation_dir.exists():
+            shutil.rmtree(attestation_dir, ignore_errors=True)
+            logger.info("已清理 workspace-attestations/")
+
     # 获取当前 agents
     existing_agents = {agent["id"]: agent for agent in list_agents()}
 

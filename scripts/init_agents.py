@@ -620,12 +620,13 @@ def init_agents(
     # 配置全局 skills 设置和 provider
     from src.openclaw_wrapper import configure_global_skills, configure_global_provider
 
-    skills_dir_rel = paths_config.get("skills_dir", "tools/skills/skills_collections")
-    skills_dir = project_root / skills_dir_rel
+    skills_dir_rel = paths_config.get("skills_dir")
     logger.info("配置全局 skills 设置...")
-    configure_global_skills(
-        extra_dirs=[str(skills_dir)],
-    )
+    if skills_dir_rel:
+        skills_dir = project_root / skills_dir_rel
+        configure_global_skills(extra_dirs=[str(skills_dir)])
+    else:
+        configure_global_skills()
     logger.info("✓ 已配置全局 skills 设置")
 
     # 配置全局 provider
@@ -662,12 +663,13 @@ def init_agents(
         from src.openclaw_wrapper import configure_agent
 
         # 从配置读取 skills 目录
-        skills_dir_rel = paths_config.get("skills_dir", "tools/skills/skills_collections")
-        skills_dir = project_root / skills_dir_rel
+        skills_dir_rel = paths_config.get("skills_dir")
         agent_skills = []
-        if skills_dir.exists():
-            agent_skills = [d.name for d in skills_dir.iterdir() if d.is_dir()]
-            logger.info(f"从 {skills_dir} 读取到 {len(agent_skills)} 个 skills")
+        if skills_dir_rel:
+            skills_dir = project_root / skills_dir_rel
+            if skills_dir.exists():
+                agent_skills = [d.name for d in skills_dir.iterdir() if d.is_dir()]
+                logger.info(f"从 {skills_dir} 读取到 {len(agent_skills)} 个 skills")
 
         # model 格式：provider_name/model_name
         model_config = f"trajectory_provider/{model}"
