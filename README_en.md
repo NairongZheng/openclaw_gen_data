@@ -19,7 +19,31 @@ English · [简体中文](README.md)
 >
 > **Upstream (Stage 1, intent construction):** https://github.com/NairongZheng/intent_creator
 >
-> **Dataset (ISETrace):** huggingface link
+> **Dataset (ISETrace):** coming soon
+
+---
+
+## Where It Fits in the ISE Pipeline
+
+`openclaw_gen_data` is not standalone — it is one stage under the [ISE-Trace](https://github.com/Valiere01/ISE-Trace) umbrella. The pipeline is split across two repositories, one per phase:
+
+```
+   intent_creator              openclaw_gen_data
+  +-------------------+        +-------------------+        +-----------+
+  | [1] Intent        | intents| [2] Simulate      |        |           |
+  |                   | .jsonl | [3] Execute       |        |  ISETrace |
+  | Persona x Domain  |------->| role-locked sim   |------->|  23,132   |
+  | x Task x Complex  |        | + real OS exec    |        |  traj.    |
+  +-------------------+        +-------------------+        +-----------+
+        Stage I                   Stage S + E                  output
+```
+
+> **[1] Intent** — `intent_creator`: samples 4D structured intents over `Persona x Domain x Task x Complexity`.
+> **[2] Simulate** + **[3] Execute** — `openclaw_gen_data` (this repo): role-locked multi-turn simulation, every tool call run on a real OS in isolation.
+> Produces **ISETrace**: 23,132 multi-turn, execution-grounded trajectories.
+
+- **Input:** structured intents sampled by `intent_creator` over `Persona × Domain × Task × Complexity` (JSONL).
+- **Output:** full raw session trajectories + training middle format, feeding into the **ISETrace** dataset.
 
 ---
 
@@ -152,22 +176,6 @@ python scripts/run_generation.py --concurrent 4
 ```
 
 To launch the whole flow in a container, see the Docker example in [`docs/search-and-deployment.md`](docs/search-and-deployment.md).
-
----
-
-## Where It Fits in the ISE Pipeline
-
-`openclaw_gen_data` is not standalone — it is one stage under the [ISE-Trace](https://github.com/Valiere01/ISE-Trace) umbrella:
-
-```
-        ┌──────────────────────────────────────┐             ┌──────────────────────────────────────────────┐
-        │   intent_creator                     │             │   openclaw_gen_data  (this repo)             │
-  ───►  │   Stage 1: 4D Intent Construction    │   ──────►   │   Stage 2+3: Multi-Turn Sim + Execution      │  ───►  ISETrace
-        └──────────────────────────────────────┘             └──────────────────────────────────────────────┘
-```
-
-- **Input:** structured intents sampled by `intent_creator` over `Persona × Domain × Task × Complexity` (JSONL).
-- **Output:** full raw session trajectories + training middle format, feeding into the **ISETrace** dataset.
 
 ---
 

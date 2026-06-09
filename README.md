@@ -19,7 +19,31 @@
 >
 > **上游（Stage 1，意图构造）:** https://github.com/NairongZheng/intent_creator
 >
-> **数据集 ISETrace:** huggingface link
+> **数据集 ISETrace:** coming soon
+
+---
+
+## 在 ISE 流水线中的位置
+
+`openclaw_gen_data` 不是孤立项目，它是 [ISE-Trace](https://github.com/Valiere01/ISE-Trace) 总入口（umbrella）下的一个阶段。整条流水线按阶段拆成两个子仓库：
+
+```
+   intent_creator              openclaw_gen_data
+  +-------------------+        +-------------------+        +-----------+
+  | [1] Intent        | intents| [2] Simulate      |        |           |
+  |                   | .jsonl | [3] Execute       |        |  ISETrace |
+  | Persona x Domain  |------->| role-locked sim   |------->|  23,132   |
+  | x Task x Complex  |        | + real OS exec    |        |  轨迹     |
+  +-------------------+        +-------------------+        +-----------+
+        Stage I                   Stage S + E                  output
+```
+
+> **[1] Intent** — `intent_creator`：在 `Persona x Domain x Task x Complexity` 上采样 4D 结构化意图。
+> **[2] Simulate** + **[3] Execute** — `openclaw_gen_data`（本仓库）：role-locked 多轮模拟，每个工具调用在真实 OS 上隔离执行。
+> 产出 **ISETrace**：23,132 条多轮、执行落地的轨迹。
+
+- **输入**：`intent_creator` 在 `Persona × Domain × Task × Complexity` 上采样得到的结构化意图（JSONL）。
+- **输出**：完整 session 原始轨迹 + 训练 middle format，汇入数据集 **ISETrace**。
 
 ---
 
@@ -154,22 +178,6 @@ python scripts/run_generation.py --concurrent 4
 ```
 
 如果你希望用容器启动整套流程，见 [`docs/search-and-deployment.md`](docs/search-and-deployment.md) 中的 Docker 示例。
-
----
-
-## 在 ISE 流水线中的位置
-
-`openclaw_gen_data` 不是孤立项目，它是 [ISE-Trace](https://github.com/Valiere01/ISE-Trace) 总入口下的一个阶段：
-
-```
-        ┌──────────────────────────┐             ┌────────────────────────────────────┐
-        │   intent_creator         │             │   openclaw_gen_data （本仓库）     │
-  ───►  │   Stage 1: 4D 意图构造   │   ──────►   │   Stage 2+3: 多轮模拟 + 执行落地   │  ───►  ISETrace
-        └──────────────────────────┘             └────────────────────────────────────┘
-```
-
-- **输入**：`intent_creator` 在 `Persona × Domain × Task × Complexity` 上采样得到的结构化意图（JSONL）。
-- **输出**：完整 session 原始轨迹 + 训练 middle format，汇入数据集 **ISETrace**。
 
 ---
 
