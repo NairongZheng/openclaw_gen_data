@@ -4,7 +4,7 @@
 
 **Stage 2 + 3 of the ISE pipeline: Multi-Turn Simulation + Execution Grounding.**
 
-*Drives a local OpenClaw agent through role-locked multi-turn interaction, runs every tool call against a real OS workspace, archives full session trajectories, and converts them into training-ready middle format.*
+*Drives a local OpenClaw agent through role-locked multi-turn interaction, runs every tool call against a real OS workspace, archives full session trajectories, and converts them into training-ready OpenAI format.*
 
 English · [简体中文](README.md)
 
@@ -43,7 +43,7 @@ English · [简体中文](README.md)
 > Produces **ISETrace**: 23,132 multi-turn, execution-grounded trajectories.
 
 - **Input:** structured intents sampled by `intent_creator` over `Persona × Domain × Task × Complexity` (JSONL).
-- **Output:** full raw session trajectories + training middle format, feeding into the **ISETrace** dataset.
+- **Output:** full raw session trajectories + training OpenAI format, feeding into the **ISETrace** dataset.
 
 ---
 
@@ -52,7 +52,7 @@ English · [简体中文](README.md)
 This repository is **Stage 2 + Stage 3** of the **ISE** (**I**ntent → **S**imulate → **E**xecute) three-stage paradigm. It consumes the structured intents produced upstream by `intent_creator` and engineers the following chain to be automated, recoverable, and reproducible:
 
 ```
-structured user intent  →  multi-turn agent interaction (simulated user)  →  raw session trajectory  →  training middle format
+structured user intent  →  multi-turn agent interaction (simulated user)  →  raw session trajectory  →  training OpenAI format
 ```
 
 The goal is not "call one agent once to finish a task," but to **batch-synthesize high-quality, execution-grounded, multi-turn trajectory data**. Unlike most pipelines that back-derive tasks from an API catalog, are single-turn, and simulate tool calls, this pipeline emphasizes:
@@ -88,7 +88,7 @@ Logically split into 6 layers:
 | Decision (User Loop) | Simulate the user advancing the task, generate queries / judge completion turn by turn | `src/llm_client.py`, `prompts/user_model_system_prompt.txt` |
 | Execution | Real interaction with the OpenClaw agent; session reset/archive/restore; runtime probe | `src/openclaw_wrapper.py`, `scripts/init_agents.py` |
 | Recovery | Worker snapshots, pending-session recovery, config baseline rollback, gateway restart | `src/worker_snapshot.py`, `src/agent_runtime.py`, `src/runtime_recovery.py`, `src/fs_utils.py` |
-| Conversion | Raw session → training middle format | `src/session_parser.py`, `src/converter.py` |
+| Conversion | Raw session → training OpenAI format | `src/session_parser.py`, `src/converter.py` |
 
 Full design notes: [`docs/project-architecture-and-introduction.md`](docs/project-architecture-and-introduction.md).
 
@@ -243,7 +243,7 @@ Common environment variables: `INTENTS_FILE`, `INTENTS_PER_SESSION`, `APPEND_QUE
 | Progress file | `output/progress.json` |
 | Run summary | `output/summary.json` |
 
-Middle format structure (close to OpenAI-style messages, plus project-specific metadata):
+OpenAI format structure (OpenAI-style messages, plus project-specific metadata):
 
 ```
 status / session_id / source_intent_ids / messages / tools / skills / final_output / metadata
@@ -258,7 +258,7 @@ status / session_id / source_intent_ids / messages / tools / skills / final_outp
 - [`docs/project-architecture-and-introduction.md`](docs/project-architecture-and-introduction.md): full write-up of background, architecture, technical details, hard parts, and highlights.
 - [`docs/run-modes.md`](docs/run-modes.md): the three run modes, input files, and config semantics.
 - [`docs/search-and-deployment.md`](docs/search-and-deployment.md): search providers, Serper, Docker, CI.
-- [`data_examples/`](data_examples/): one high-quality session and its corresponding middle format example.
+- [`data_examples/`](data_examples/): one high-quality session and its corresponding OpenAI format example.
 
 ---
 

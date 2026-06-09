@@ -4,7 +4,7 @@
 
 **ISE 流水线的 Stage 2 + 3：多轮模拟 + 真实执行落地。**
 
-*驱动本地 OpenClaw agent 完成 role-locked 多轮交互，把每一次工具调用都放进真实 OS workspace 里跑，归档完整 session 轨迹并转换为训练用 middle format。*
+*驱动本地 OpenClaw agent 完成 role-locked 多轮交互，把每一次工具调用都放进真实 OS workspace 里跑，归档完整 session 轨迹并转换为训练用 OpenAI format。*
 
 简体中文 · [English](README_en.md)
 
@@ -43,7 +43,7 @@
 > 产出 **ISETrace**：23,132 条多轮、执行落地的轨迹。
 
 - **输入**：`intent_creator` 在 `Persona × Domain × Task × Complexity` 上采样得到的结构化意图（JSONL）。
-- **输出**：完整 session 原始轨迹 + 训练 middle format，汇入数据集 **ISETrace**。
+- **输出**：完整 session 原始轨迹 + 训练 OpenAI format，汇入数据集 **ISETrace**。
 
 ---
 
@@ -52,7 +52,7 @@
 本仓库是 **ISE**（**I**ntent → **S**imulate → **E**xecute）三阶段范式中的 **Stage 2 + Stage 3**。它接收上游 `intent_creator` 产出的结构化意图，完成下面这条链路的工程化、自动化、可恢复化：
 
 ```
-结构化用户意图  →  多轮 Agent 交互（模拟用户）  →  原始 session 轨迹  →  训练 middle format
+结构化用户意图  →  多轮 Agent 交互（模拟用户）  →  原始 session 轨迹  →  训练 OpenAI format
 ```
 
 它解决的不是「单次调一个 Agent 完成任务」，而是**批量构造高质量、真实落地的多轮 trajectory 数据**。与多数「从 API 目录反推任务、单轮、模拟工具调用」的合成流程不同，本管线强调：
@@ -88,7 +88,7 @@
 | 决策层（User Loop） | 模拟用户推进任务，逐轮生成 query / 判定完成 | `src/llm_client.py`, `prompts/user_model_system_prompt.txt` |
 | 执行层 | 与 OpenClaw agent 真实交互、session 重置/归档/恢复、runtime probe | `src/openclaw_wrapper.py`, `scripts/init_agents.py` |
 | 恢复层 | worker snapshot、pending session 恢复、配置 baseline 回滚、gateway 重启 | `src/worker_snapshot.py`, `src/agent_runtime.py`, `src/runtime_recovery.py`, `src/fs_utils.py` |
-| 转换层 | 原始 session → 训练 middle format | `src/session_parser.py`, `src/converter.py` |
+| 转换层 | 原始 session → 训练 OpenAI format | `src/session_parser.py`, `src/converter.py` |
 
 完整设计见 [`docs/project-architecture-and-introduction.md`](docs/project-architecture-and-introduction.md)。
 
@@ -245,7 +245,7 @@ python scripts/run_generation.py --concurrent 4
 | 进度文件 | `output/progress.json` |
 | 运行汇总 | `output/summary.json` |
 
-middle format 输出结构（接近 OpenAI 风格消息，并保留项目特定元数据）：
+OpenAI format 输出结构（OpenAI 风格消息，并保留项目特定元数据）：
 
 ```
 status / session_id / source_intent_ids / messages / tools / skills / final_output / metadata
@@ -260,7 +260,7 @@ status / session_id / source_intent_ids / messages / tools / skills / final_outp
 - [`docs/project-architecture-and-introduction.md`](docs/project-architecture-and-introduction.md)：项目背景、架构、技术细节、难点与亮点的完整介绍。
 - [`docs/run-modes.md`](docs/run-modes.md)：三种运行模式、输入文件和配置语义。
 - [`docs/search-and-deployment.md`](docs/search-and-deployment.md)：搜索 provider、Serper、Docker、CI。
-- [`data_examples/`](data_examples/)：一条高质量 session 与其对应 middle format 的示例。
+- [`data_examples/`](data_examples/)：一条高质量 session 与其对应 OpenAI format 的示例。
 
 ---
 
