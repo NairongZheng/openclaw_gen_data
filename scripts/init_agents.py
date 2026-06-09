@@ -297,7 +297,6 @@ def _capture_runtime_probe_data_via_probe(
         configure_agent(
             probe_agent_id,
             workspace=str(probe_workspace),
-            tools_allow=(source_agent_config.get("tools") or {}).get("allow"),
             model=source_agent_config.get("model"),
             skills=source_agent_config.get("skills"),
         )

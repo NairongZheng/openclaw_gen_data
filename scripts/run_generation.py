@@ -18,7 +18,7 @@ else:
     sys.path.insert(0, str(Path(os.getcwd())))
 
 from src.config import load_config, resolve_config_path
-from src.agent_runtime import cleanup_agents, resolve_project_root, restore_workspace_snapshot
+from src.agent_runtime import cleanup_agents, restore_workspace_snapshot
 from src.intent_loader import load_intents
 from src.openclaw_wrapper import OpenClawWrapper, ensure_agents
 from src.llm_client import LLMClient
@@ -45,7 +45,7 @@ from src.runtime_recovery import (
     recover_openclaw_runtime_from_baseline,
     resolve_openclaw_runtime_paths,
 )
-from src.utils import ensure_dir, save_json, setup_logging
+from src.utils import ensure_dir, resolve_project_root, save_json, setup_logging
 from src.worker_snapshot import (
     clear_worker_runtime_snapshot,
     list_pending_snapshot_intent_ids,

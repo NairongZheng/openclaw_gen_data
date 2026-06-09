@@ -133,17 +133,15 @@ def clone_workspace_template(template_workspace: Path, target_workspace: Path) -
 def configure_agent(
     agent_id: str,
     workspace: Optional[str] = None,
-    tools_allow: Optional[List[str]] = None,
     model: Optional[str] = None,
     skills: Optional[List[str]] = None,
     config_path: Optional[Path] = None
 ) -> None:
-    """配置 agent 的 workspace、工具、provider、model 和 skills。
+    """配置 agent 的 workspace、model 和 skills。
 
     Args:
         agent_id: agent 名称
         workspace: workspace 路径（可选）
-        tools_allow: 工具列表（可选，使用 allow 完全替换）
         model: model 名称（可选）
         skills: skills 列表（可选）
         config_path: 配置文件路径（可选，默认 ~/.openclaw/openclaw.json）
@@ -177,12 +175,7 @@ def configure_agent(
         agent_config["workspace"] = workspace
         logger.info(f"已配置 agent {agent_id} 的 workspace: {workspace}")
 
-    # 5. 配置 tools（使用 allow 完全替换）
-    if tools_allow is not None:
-        agent_config["tools"] = {"allow": tools_allow}
-        logger.info(f"已配置 agent {agent_id} 的工具列表（allow: {len(tools_allow)} 个）")
-
-    # 6. 配置 provider（覆盖已有配置）
+    # 5. 配置 provider（覆盖已有配置）
     # 注意：OpenClaw 不支持 agent 级别的 providers 配置，跳过
     # if provider is not None:
     #     if "providers" not in agent_config:
@@ -387,7 +380,6 @@ def ensure_agents(
     worker_prefix: str = "gendata-worker",
     workspace_root: Optional[str] = None,
     force_recreate: bool = False,
-    tools_allow: Optional[List[str]] = None,
 ) -> Dict[str, List[str]]:
     """确保所需数量的 worker agents 存在并使用独立 workspace。
 
@@ -396,7 +388,6 @@ def ensure_agents(
         worker_prefix: worker agent 前缀
         workspace_root: workspace 根目录
         force_recreate: 是否强制删除所有 worker agents 重新创建
-        tools_allow: 工具 allowlist；为 None 时不限制（使用 OpenClaw 默认）
 
     Returns:
         包含 created、existing、deleted 列表的字典
@@ -472,7 +463,6 @@ def ensure_agents(
         configure_agent(
             agent_id,
             workspace=str(desired_workspace),
-            tools_allow=tools_allow,
         )
     logger.info("已完成配置（workspace）")
 

@@ -25,7 +25,7 @@ class ProgressTracker:
             self.data = load_json(str(self.progress_file))
         else:
             self.data = {"items": {}, "summary": {}}
-        items = self.data.get("items", {}).values()
+        items = (self.data.get("items") or {}).values()
         self._success_count = sum(1 for item in items if item.get("status") == "success")
         self._failed_count = sum(1 for item in items if item.get("status") == "failed")
 

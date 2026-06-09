@@ -56,9 +56,9 @@ export OPENCLAW_SEARCH_BASE_URL="https://api.moonshot.cn/v1"
 
 ## Serper 插件
 
-仓库内已经提供外部插件 [openclaw_plugins/serper](../openclaw_plugins/serper)。
+Serper 插件在 Docker 镜像构建时已自动安装和启用（见 `Dockerfile`）。
 
-启用方式：
+容器启动时只需通过环境变量注入 API 凭证：
 
 ```bash
 export OPENCLAW_SEARCH_PROVIDER="serper"
@@ -66,10 +66,12 @@ export OPENCLAW_SEARCH_API_KEY="your-serper-api-key"
 export OPENCLAW_SEARCH_BASE_URL="https://google.serper.dev"
 ```
 
+启动脚本会自动将凭证写入 `plugins.entries.serper.config.webSearch`。
+
 说明：
 
-- 不需要额外的 Serper 专用环境变量
-- 启动脚本会自动写入插件加载路径和 `plugins.entries.serper.config.webSearch`
+- Serper 插件在镜像构建阶段已通过 `openclaw plugins install` 安装，不再从本地路径加载
+- 本地开发（非容器）需要手动执行 `openclaw plugins install openclaw_plugins/serper` 和 `openclaw plugins enable serper`
 - 不需要修改 OpenClaw 主仓库源码
 
 ## Serper 测试
@@ -77,13 +79,7 @@ export OPENCLAW_SEARCH_BASE_URL="https://google.serper.dev"
 静态检查：
 
 ```bash
-/Users/zhengnairong/miniconda3/envs/dev/bin/python tests/test_serper_plugin.py
-```
-
-或：
-
-```bash
-/Users/zhengnairong/miniconda3/envs/dev/bin/python -m pytest -q tests/test_serper_plugin.py
+pytest -q tests/test_serper_plugin.py
 ```
 
 live smoke test：
@@ -92,7 +88,7 @@ live smoke test：
 OPENCLAW_SEARCH_PROVIDER=serper \
 OPENCLAW_SEARCH_API_KEY=your-serper-api-key \
 OPENCLAW_SEARCH_BASE_URL=https://google.serper.dev \
-/Users/zhengnairong/miniconda3/envs/dev/bin/python tests/test_serper_plugin.py --live
+python tests/test_serper_plugin.py --live
 ```
 
 ## Docker

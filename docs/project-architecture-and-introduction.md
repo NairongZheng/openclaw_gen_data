@@ -277,10 +277,9 @@
 1. 根据配置确保 worker agents 存在
 2. 若需要，删除旧 agents 并重建
 3. 为每个 agent 分配独立 workspace
-4. 配置 worker 工具白名单
-5. 配置全局 provider 与全局 skills
-6. 生成共享 workspace 快照
-7. 可选刷新共享 runtime metadata（`--refresh-tools`）
+4. 配置全局 provider 与全局 skills
+5. 生成共享 workspace 快照
+6. 可选刷新共享 runtime metadata（`--refresh-tools`）
 
 这里有一个很重要的工程点：
 

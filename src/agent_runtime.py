@@ -7,7 +7,6 @@ from typing import Any, Dict, List
 
 from src.fs_utils import ensure_owner_writable, make_tree_owner_writable, remove_path, remove_tree
 from src.openclaw_wrapper import OpenClawWrapper, expected_agent_workspace, resolve_workspace_root
-from src.utils import resolve_project_root
 from src.worker_snapshot import resolve_template_snapshot_root
 
 logger = logging.getLogger(__name__)
