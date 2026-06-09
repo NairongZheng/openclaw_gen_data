@@ -7,11 +7,6 @@ class SessionParser:
     """OpenClaw Session文件解析器"""
 
     @staticmethod
-    def parse_session_file(file_path: str) -> List[Dict]:
-        """兼容旧调用名。"""
-        return SessionParser.parse_jsonl_file(file_path)
-
-    @staticmethod
     def parse_jsonl_file(file_path: str) -> List[Dict]:
         """解析JSONL文件，返回所有消息对象
 

@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from src.openclaw_wrapper import load_openclaw_config, save_openclaw_config
+from src.utils import merge_dicts
 
 
 logger = logging.getLogger(__name__)
@@ -88,23 +89,6 @@ def build_discovery_patch(mdns_mode: str) -> Dict[str, Any]:
             }
         }
     }
-
-
-def merge_dicts(base: Dict[str, Any], updates: Dict[str, Any]) -> Dict[str, Any]:
-    """递归合并字典，updates 优先。"""
-    merged: Dict[str, Any] = dict(base)
-    for key, value in updates.items():
-        if isinstance(value, dict) and isinstance(merged.get(key), dict):
-            merged[key] = merge_dicts(merged[key], value)
-        elif isinstance(value, list) and isinstance(merged.get(key), list):
-            existing = list(merged[key])
-            for item in value:
-                if item not in existing:
-                    existing.append(item)
-            merged[key] = existing
-        else:
-            merged[key] = value
-    return merged
 
 
 def resolve_search_env_config() -> Optional[Dict[str, str]]:

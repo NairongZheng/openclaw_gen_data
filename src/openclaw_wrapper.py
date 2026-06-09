@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from src.fs_utils import make_tree_owner_writable, remove_tree
+from src.utils import merge_dicts
 
 logger = logging.getLogger(__name__)
 
@@ -25,17 +26,6 @@ WORKER_TOOLS_ALLOW = [
     "session_status", "subagents", "agents_list",
     "image", "tts"
 ]
-
-
-def _merge_dicts(base: Optional[Dict[str, Any]], updates: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """递归合并字典，updates 优先。"""
-    merged: Dict[str, Any] = dict(base or {})
-    for key, value in (updates or {}).items():
-        if isinstance(value, dict) and isinstance(merged.get(key), dict):
-            merged[key] = _merge_dicts(merged[key], value)
-        else:
-            merged[key] = value
-    return merged
 
 
 def get_openclaw_config_path(config_path: Optional[Path] = None) -> Path:
@@ -333,7 +323,7 @@ def apply_openclaw_config_patch(
         raise ValueError("patch 必须是字典")
 
     config = load_openclaw_config(config_path)
-    merged_config = _merge_dicts(config, patch)
+    merged_config = merge_dicts(config, patch)
     save_openclaw_config(merged_config, config_path)
 
 
@@ -370,7 +360,6 @@ def delete_worker_agents(
     #         continue
     #     deleted.append(agent_id)
     # return deleted
-
     config = load_openclaw_config(config_path, default={"agents": {"list": []}})
     agent_list = config.setdefault("agents", {}).setdefault("list", [])
     worker_agents = [

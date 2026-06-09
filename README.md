@@ -1,10 +1,6 @@
 # OpenClaw Gen Data
 
-基于本地 OpenClaw agent 自动生成 trajectory 数据，并转换为训练使用的 middle format。
-
-## 这是什么
-
-这个项目用于：
+基于本地 OpenClaw agent 自动生成 trajectory 数据，并转换为标准的 openai format (middle format)。
 
 - 读取 task 数据（intent 或 query）
 - 驱动 OpenClaw agent 执行交互
@@ -88,102 +84,15 @@ python scripts/run_generation.py --concurrent 4
 
 如果你希望用容器启动整套流程，见 [docs/search-and-deployment.md](docs/search-and-deployment.md) 中的 Docker 示例。
 
-## 三种运行模式
+## 运行模式
 
-### 1. 普通 intent 模式
+| 模式 | 适用场景 | 关键配置 |
+|------|----------|----------|
+| intent 模式 | 有 `natural_language_intent` 的任务，走 LLM user loop 多轮驱动 | `INTENTS_FILE` |
+| query 模式 | 有 `query`/`question` 的任务，直接发给 OpenClaw | `INTENTS_FILE`，`APPEND_QUERY_ENABLED=false` |
+| intent + 收口 query | intent 任务 + 每个 session 收口前追加 1 条 query | `APPEND_QUERY_ENABLED=true`，`APPEND_QUERY_FILE` |
 
-主输入文件放在 `paths.intents_file`，每行至少包含 `natural_language_intent`。
-
-示例：
-
-```jsonl
-{"id": "intent_1", "natural_language_intent": "帮我总结最近的 AI 新闻"}
-```
-
-运行命令：
-
-```bash
-INTENTS_FILE=data/intents.jsonl \
-python scripts/run_generation.py --concurrent 4
-```
-
-### 2. 纯 query 模式
-
-如果你不想跑 intent，只想直接跑 search query，也已经支持。
-
-这时仍然使用 `paths.intents_file`，但文件内容改成 query 数据。支持：
-
-```jsonl
-{"id": "query_1", "query": "2025 年最值得关注的 AI Agent 产品有哪些？"}
-{"id": "query_2", "question": "2025 年最强多模态模型有哪些？", "answer": "可选参考答案"}
-```
-
-运行命令：
-
-```bash
-INTENTS_FILE=data/merged_data_sample_20.jsonl \
-APPEND_QUERY_ENABLED=false \
-python scripts/run_generation.py --concurrent 4
-```
-
-说明：
-
-- `query` / `question` 会被归一化为 `direct_query`
-- 不走 LLM user loop
-- 直接把 query 发给 OpenClaw
-- 仍然会归档 session，并产出 middle format
-
-### 3. intent + 收口追加 query 模式
-
-如果你想：
-
-- 主文件跑普通 intents
-- 每个 session 正常收口时，再追加 1 条 query
-
-那么需要两个文件：
-
-- `paths.intents_file`：intent 文件
-- `generation.append_query_file`：query 池文件
-
-配置示例：
-
-```yaml
-generation:
-  intents_per_session: 3
-  append_query_enabled: true
-  append_query_file: "data/merged_data_sample_20.jsonl"
-
-paths:
-  intents_file: "data/intents.jsonl"
-```
-
-运行命令：
-
-```bash
-INTENTS_FILE=data/intents.jsonl \
-INTENTS_PER_SESSION=3 \
-APPEND_QUERY_ENABLED=true \
-APPEND_QUERY_FILE=data/merged_data_sample_20.jsonl \
-python scripts/run_generation.py --concurrent 4
-```
-
-当前语义很简单：
-
-- 只要 session 正常 finalize
-- 且 `append_query_enabled=true`
-- 且 `append_query_file` 非空
-- 就会在收口前固定追加 1 条 query
-
-## 输入格式
-
-主流程会自动把输入规范成 task：
-
-- 有 `natural_language_intent`：当作 `intent`
-- 有 `query` 或 `question`：当作 `direct_query`
-- `question/answer` 数据可直接使用
-- 没有显式 `id` 时会自动生成稳定 id
-
-这意味着像 [data_examples/queries.jsonl](data_examples/queries.jsonl) 这类 search 数据可以直接跑，不需要额外转换。
+详细说明见 [docs/run-modes.md](docs/run-modes.md)。
 
 ## 常用配置
 
@@ -218,6 +127,6 @@ python scripts/run_generation.py --concurrent 4
 - [docs/project-architecture-and-introduction.md](docs/project-architecture-and-introduction.md)：项目背景、架构、技术细节、难点与亮点的完整介绍
 - [docs/run-modes.md](docs/run-modes.md)：三种运行模式、输入文件和配置语义
 - [docs/search-and-deployment.md](docs/search-and-deployment.md)：搜索 provider、Serper、Docker、CI
-- [docs/raw_design.txt](docs/raw_design.txt)：原始设计记录
-- [docs/plan.md](docs/plan.md)：历史开发计划
 - [data_examples/safety_compliance_audit_middle_format.json](data_examples/safety_compliance_audit_middle_format.json)：middle format 示例
+
+历史设计记录：[docs/raw_design.txt](docs/raw_design.txt)、[docs/plan.md](docs/plan.md)

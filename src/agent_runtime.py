@@ -1,31 +1,18 @@
 """Agent 运行时清理与 workspace 快照恢复。"""
 import logging
-import os
 import shutil
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from src.fs_utils import ensure_owner_writable, make_tree_owner_writable, remove_path, remove_tree
 from src.openclaw_wrapper import OpenClawWrapper, expected_agent_workspace, resolve_workspace_root
+from src.utils import resolve_project_root
 from src.worker_snapshot import resolve_template_snapshot_root
 
 logger = logging.getLogger(__name__)
 
 SHARED_WORKSPACE_SNAPSHOT_NAME = "_template"
-
-
-def resolve_project_root() -> Path:
-    """解析项目根目录。"""
-    if "__file__" in globals():
-        return Path(__file__).parent.parent
-    return Path(os.getcwd())
-
-
-def get_workspace_snapshot_dir(project_root: Optional[Path] = None) -> Path:
-    """返回 workspace 快照根目录。"""
-    root = project_root or resolve_project_root()
-    return root / "output" / "worker_snapshots" / "template_workspace"
 
 
 def restore_workspace_snapshot(agent_name: str, config: Dict[str, Any]) -> None:

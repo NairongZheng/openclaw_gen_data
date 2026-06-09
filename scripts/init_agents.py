@@ -44,6 +44,7 @@ from src.worker_snapshot import (
     resolve_runtime_snapshot_root,
     resolve_template_snapshot_root,
 )
+from src.utils import resolve_project_root
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -51,13 +52,6 @@ logger = logging.getLogger(__name__)
 
 SNAPSHOT_EXCLUDE_NAMES = {".git", "BOOTSTRAP.md"}
 SHARED_WORKSPACE_SNAPSHOT_NAME = "_template"
-
-
-def resolve_project_root() -> Path:
-    """解析项目根目录。"""
-    if '__file__' in globals():
-        return Path(__file__).parent.parent
-    return Path(os.getcwd())
 
 
 def resolve_init_settings(

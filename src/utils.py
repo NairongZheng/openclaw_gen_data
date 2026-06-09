@@ -1,8 +1,9 @@
 """工具函数"""
 import json
 import logging
+import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, Optional
 
 
 def setup_logging(log_dir: str = "output/logs", level: int = logging.INFO):
@@ -46,3 +47,27 @@ def load_json(filepath: str) -> Any:
 def ensure_dir(path: str) -> None:
     """确保目录存在。"""
     Path(path).mkdir(parents=True, exist_ok=True)
+
+
+def resolve_project_root() -> Path:
+    """解析项目根目录。"""
+    if "__file__" in globals():
+        return Path(__file__).parent.parent
+    return Path(os.getcwd())
+
+
+def merge_dicts(base: Optional[Dict[str, Any]], updates: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """递归合并字典，updates 优先。lists 做去重合并，None 输入视为空 dict。"""
+    merged: Dict[str, Any] = dict(base or {})
+    for key, value in (updates or {}).items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = merge_dicts(merged[key], value)
+        elif isinstance(value, list) and isinstance(merged.get(key), list):
+            existing = list(merged[key])
+            for item in value:
+                if item not in existing:
+                    existing.append(item)
+            merged[key] = existing
+        else:
+            merged[key] = value
+    return merged
