@@ -544,7 +544,6 @@ def init_agents(
     refresh_tools: bool = True,
     project_root: Optional[Path] = None,
     runtime_metadata_output_file: Optional[str] = None,
-    add_tools: bool = True,
     config: Optional[Dict[str, Any]] = None,
 ) -> bool:
     """初始化多个 OpenClaw agent，可选刷新运行时 metadata。
@@ -557,7 +556,6 @@ def init_agents(
         refresh_tools: 是否刷新所有 agents 的运行时 metadata
         project_root: 项目根目录
         runtime_metadata_output_file: 运行时 metadata 输出文件路径
-        add_tools: 是否自动配置工具白名单（默认 True）
         config: 已加载的配置字典（可选）
 
     Returns:
@@ -570,7 +568,6 @@ def init_agents(
     config = config or load_config()
     openclaw_config = config.get("openclaw", {})
     paths_config = config.get("paths", {})
-    worker_tools_allow = openclaw_config.get("worker_tools_allow")
 
     # 如果强制重建，先删除旧的 workspace 快照
     if force_recreate:
@@ -588,8 +585,6 @@ def init_agents(
         worker_prefix=worker_prefix,
         workspace_root=str(root_dir),
         force_recreate=force_recreate,
-        add_tools=add_tools,
-        tools_allow=worker_tools_allow,
     )
     logger.info(
         "已存在: %s，新建: %s，已删除: %s",
@@ -735,12 +730,6 @@ def main():
         action="store_true",
         help="初始化后刷新所有 agent 的运行时 metadata（tools + system prompt）"
     )
-    parser.add_argument(
-        "--add-tools",
-        action="store_true",
-        default=True,
-        help="自动配置 worker agent 的工具白名单（默认: true）"
-    )
 
     args = parser.parse_args()
 
@@ -762,7 +751,6 @@ def main():
         refresh_tools=args.refresh_tools,
         project_root=project_root,
         runtime_metadata_output_file=settings["runtime_metadata_output_file"],
-        add_tools=args.add_tools,
         config=config,
     )
     if success:

@@ -16,18 +16,6 @@ logger = logging.getLogger(__name__)
 DEFAULT_OPENCLAW_CONFIG_PATH = Path.home() / ".openclaw" / "openclaw.json"
 
 
-# Worker 工具默认 allowlist（配置缺失时兜底）
-WORKER_TOOLS_ALLOW = [
-    "read", "write", "edit", "apply_patch",
-    "exec", "process",
-    "web_search", "web_fetch",
-    "memory_search", "memory_get",
-    "sessions_list", "sessions_history", "sessions_send", "sessions_spawn",
-    "session_status", "subagents", "agents_list",
-    "image", "tts"
-]
-
-
 def get_openclaw_config_path(config_path: Optional[Path] = None) -> Path:
     """返回 OpenClaw 配置文件路径。"""
     return config_path or DEFAULT_OPENCLAW_CONFIG_PATH
@@ -399,7 +387,6 @@ def ensure_agents(
     worker_prefix: str = "gendata-worker",
     workspace_root: Optional[str] = None,
     force_recreate: bool = False,
-    add_tools: bool = True,
     tools_allow: Optional[List[str]] = None,
 ) -> Dict[str, List[str]]:
     """确保所需数量的 worker agents 存在并使用独立 workspace。
@@ -409,8 +396,7 @@ def ensure_agents(
         worker_prefix: worker agent 前缀
         workspace_root: workspace 根目录
         force_recreate: 是否强制删除所有 worker agents 重新创建
-        add_tools: 是否自动配置工具（默认 True）
-        tools_allow: worker 工具 allowlist；为空时使用默认列表
+        tools_allow: 工具 allowlist；为 None 时不限制（使用 OpenClaw 默认）
 
     Returns:
         包含 created、existing、deleted 列表的字典
@@ -479,20 +465,16 @@ def ensure_agents(
             created.append(agent_id)
 
     # 配置 workspace 和工具
-    if add_tools:
-        effective_tools_allow = WORKER_TOOLS_ALLOW if tools_allow is None else tools_allow
-        all_agent_ids = [f"{worker_prefix}-{i+1}" for i in range(num_agents)]
-        logger.info(f"开始配置 {len(all_agent_ids)} 个 agents...")
-        for agent_id in all_agent_ids:
-            desired_workspace = expected_agent_workspace(agent_id, str(root_dir))
-            configure_agent(
-                agent_id,
-                workspace=str(desired_workspace),
-                tools_allow=effective_tools_allow,
-            )
-        logger.info(
-            f"已完成配置（workspace + {len(effective_tools_allow)} 个工具）"
+    all_agent_ids = [f"{worker_prefix}-{i+1}" for i in range(num_agents)]
+    logger.info(f"开始配置 {len(all_agent_ids)} 个 agents...")
+    for agent_id in all_agent_ids:
+        desired_workspace = expected_agent_workspace(agent_id, str(root_dir))
+        configure_agent(
+            agent_id,
+            workspace=str(desired_workspace),
+            tools_allow=tools_allow,
         )
+    logger.info("已完成配置（workspace）")
 
     return {"created": created, "existing": existing, "deleted": deleted}
 
