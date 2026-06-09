@@ -4,7 +4,7 @@
 
 ## 运行时配置
 
-当前推荐通过 [scripts/start_generation_in_container.sh](../scripts/start_generation_in_container.sh) 在 `init_agents` 完成后、gateway 启动前 patch `~/.openclaw/openclaw.json`。
+当前推荐通过 [scripts/start_generation_in_container.sh](../scripts/start_generation_in_container.sh) 在 `init_agents` 运行前先 patch `~/.openclaw/openclaw.json`，确保 `--refresh-tools` 捕获到的是最新配置下的工具定义。
 
 ### runtime metadata 刷新
 

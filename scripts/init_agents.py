@@ -29,13 +29,11 @@ from src.openclaw_wrapper import (
     expected_agent_workspace,
     load_openclaw_config,
     resolve_workspace_root,
-    OpenClawWrapper,
 )
 from src.config import load_config
 from src.fs_utils import ensure_owner_writable, make_tree_owner_writable, remove_path, remove_tree
 from src.runtime_metadata_cache import (
     build_runtime_metadata_payload,
-    load_runtime_metadata_cache,
     resolve_runtime_metadata_cache_file,
     resolve_runtime_probe_capture_file,
     save_runtime_metadata_cache,
@@ -627,7 +625,6 @@ def init_agents(
     logger.info("配置全局 skills 设置...")
     configure_global_skills(
         extra_dirs=[str(skills_dir)],
-        allow_bundled=[]  # 禁用所有内置 skills
     )
     logger.info("✓ 已配置全局 skills 设置")
 
