@@ -374,9 +374,11 @@ def worker_loop(
     agent_name: str,
     task_queue: "queue.Queue[Dict[str, Any]]",
     config: Dict[str, Any],
-    runtime_metadata_cache_file: str,
     progress: ProgressTracker,
     append_query_pool: List[Dict[str, Any]],
+    worker_tools: List[Dict[str, Any]],
+    llm: LLMClient,
+    converter: DataConverter,
 ) -> List[Dict[str, Any]]:
     """单个 worker 串行消费 intent 队列，但多个 worker 之间并发。
 
@@ -384,18 +386,11 @@ def worker_loop(
         agent_name: worker agent 名称
         task_queue: 任务队列
         config: 配置
-        runtime_metadata_cache_file: 运行时 metadata 缓存文件路径
         progress: 进度跟踪器
 
     Returns:
         处理结果列表
     """
-
-    # 为当前 worker 的 agent 加载工具列表
-    worker_tools = load_agent_tools(runtime_metadata_cache_file, agent_name)
-    llm = create_llm_client(config)
-
-    converter = DataConverter(runtime_metadata_cache_file=runtime_metadata_cache_file)
 
     openclaw = OpenClawWrapper(agent_name)
 
@@ -734,6 +729,10 @@ def main():
     # 设置活跃的 agent 列表（用于 Ctrl+C 清理）
     _active_agents = [f"{worker_prefix}-{i+1}" for i in range(num_workers)]
 
+    shared_tools = load_agent_tools(runtime_metadata_cache_file, "shared")
+    shared_llm = create_llm_client(config)
+    shared_converter = DataConverter(runtime_metadata_cache_file=runtime_metadata_cache_file)
+
     while True:
         snapshot_pending_intent_ids = list_pending_snapshot_intent_ids(paths_config)
         pending_intents = [
@@ -773,9 +772,11 @@ def main():
                     agent_name,
                     task_queue,
                     config,
-                    runtime_metadata_cache_file,
                     progress,
                     append_query_pool,
+                    shared_tools,
+                    shared_llm,
+                    shared_converter,
                 )
                 futures.append(future)
 

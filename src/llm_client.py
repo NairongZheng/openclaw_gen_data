@@ -85,6 +85,8 @@ class LLMClient:
         self.retry_base_delay = max(0.0, retry_base_delay)
         self.retry_max_delay = max(self.retry_base_delay, retry_max_delay)
         self.enable_thinking = enable_thinking
+        prompt_file = Path(__file__).parent.parent / "prompts" / "user_model_system_prompt.txt"
+        self._system_prompt_template: str = prompt_file.read_text(encoding="utf-8")
 
     def generate_next_query(
         self,
@@ -202,9 +204,7 @@ class LLMClient:
             System prompt 字符串
         """
         # 读取 prompt 模板文件
-        prompt_file = Path(__file__).parent.parent / "prompts" / "user_model_system_prompt.txt"
-        with open(prompt_file, "r", encoding="utf-8") as f:
-            template = f.read()
+        template = self._system_prompt_template
 
         # 提取 persona 字段
         name             = persona.get("name", "the user")

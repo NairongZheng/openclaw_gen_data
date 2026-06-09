@@ -25,6 +25,9 @@ class ProgressTracker:
             self.data = load_json(str(self.progress_file))
         else:
             self.data = {"items": {}, "summary": {}}
+        items = self.data.get("items", {}).values()
+        self._success_count = sum(1 for item in items if item.get("status") == "success")
+        self._failed_count = sum(1 for item in items if item.get("status") == "failed")
 
     def is_success(self, intent_id: str) -> bool:
         item = self.data.get("items", {}).get(intent_id)
@@ -33,14 +36,22 @@ class ProgressTracker:
     def record(self, result: Dict[str, Any]) -> None:
         intent_id = str(result["intent_id"])
         with self.lock:
-            self.data.setdefault("items", {})[intent_id] = result
-            total = len(self.data["items"])
-            success = sum(1 for item in self.data["items"].values() if item.get("status") == "success")
-            failed = sum(1 for item in self.data["items"].values() if item.get("status") == "failed")
+            old = self.data.setdefault("items", {}).get(intent_id)
+            old_status = old.get("status") if old else None
+            self.data["items"][intent_id] = result
+            new_status = result.get("status")
+            if old_status == "success":
+                self._success_count -= 1
+            elif old_status == "failed":
+                self._failed_count -= 1
+            if new_status == "success":
+                self._success_count += 1
+            elif new_status == "failed":
+                self._failed_count += 1
             self.data["summary"] = {
-                "total_recorded": total,
-                "success": success,
-                "failed": failed,
+                "total_recorded": len(self.data["items"]),
+                "success": self._success_count,
+                "failed": self._failed_count,
             }
             save_json(self.data, str(self.progress_file))
 
