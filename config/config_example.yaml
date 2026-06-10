@@ -26,6 +26,12 @@ openclaw:
   context_window: 360000
   max_tokens: 36000
 
+  # Skills 配置
+  # 外部 skills 目录路径；为空或不设置时不加载自定义 skills
+  skills_dir: "tools/skills/skills_collections"
+  # 是否禁用 OpenClaw 内置 skills；false（默认）内置 skills 正常可用
+  disable_bundled_skills: false
+
 
 # ============== LLM API 配置 ==============
 llm:
@@ -70,6 +76,3 @@ paths:
   # 使用 init_agents.py --refresh-tools 或 run_generation.py --refresh-tools 时自动生成
   # 中间格式转换会优先读取这里的真实运行时 metadata；缺失时再退回 session 元数据 / workspace 动态构建
   runtime_metadata_cache_file: "output/worker_snapshots/runtime_metadata/runtime_metadata.json"
-
-  # Skills 目录路径
-  skills_dir: "tools/skills/skills_collections"

@@ -107,7 +107,7 @@ If you mainly run inside a container, use [`scripts/start_generation_in_containe
 
 ```bash
 pip install -r requirements.txt
-cp config/config.yaml.example config/config.yaml
+cp config/config_example.yaml config/config.yaml
 ```
 
 > Install into an isolated virtual environment (venv / conda). Python 3.10+ is required.

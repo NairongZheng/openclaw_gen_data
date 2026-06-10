@@ -332,7 +332,7 @@ tail -f output/logs/generation.log
 
 **任务**：
 - [x] 创建新的目录结构
-- [x] 配置管理系统（config.py + config.yaml.example）
+- [x] 配置管理系统（config.py + config_example.yaml）
 - [x] 日志系统（logging_config.py）
 - [x] 数据模型定义（使用 Pydantic）
 - [x] 基础工具函数（file_utils.py, validators.py）
@@ -344,7 +344,7 @@ tail -f output/logs/generation.log
 - `src/openclaw_gen/logging_config.py`
 - `src/openclaw_gen/utils/file_utils.py`
 - `src/openclaw_gen/utils/validators.py`
-- `config/config.yaml.example`
+- `config/config_example.yaml`
 - `requirements.txt`
 - `setup.py`
 

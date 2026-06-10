@@ -107,7 +107,7 @@
 
 ```bash
 pip install -r requirements.txt
-cp config/config.yaml.example config/config.yaml
+cp config/config_example.yaml config/config.yaml
 ```
 
 > 建议在独立的虚拟环境（venv / conda）中安装，需要 Python 3.10+。

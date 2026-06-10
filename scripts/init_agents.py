@@ -620,13 +620,13 @@ def init_agents(
     # 配置全局 skills 设置和 provider
     from src.openclaw_wrapper import configure_global_skills, configure_global_provider
 
-    skills_dir_rel = paths_config.get("skills_dir")
+    skills_dir_rel = openclaw_config.get("skills_dir")
+    disable_bundled = openclaw_config.get("disable_bundled_skills", False)
     logger.info("配置全局 skills 设置...")
-    if skills_dir_rel:
-        skills_dir = project_root / skills_dir_rel
-        configure_global_skills(extra_dirs=[str(skills_dir)])
-    else:
-        configure_global_skills()
+    configure_global_skills(
+        extra_dirs=[str(project_root / skills_dir_rel)] if skills_dir_rel else None,
+        allow_bundled=[] if disable_bundled else None,
+    )
     logger.info("✓ 已配置全局 skills 设置")
 
     # 配置全局 provider
@@ -663,7 +663,7 @@ def init_agents(
         from src.openclaw_wrapper import configure_agent
 
         # 从配置读取 skills 目录
-        skills_dir_rel = paths_config.get("skills_dir")
+        skills_dir_rel = openclaw_config.get("skills_dir")
         agent_skills = []
         if skills_dir_rel:
             skills_dir = project_root / skills_dir_rel
