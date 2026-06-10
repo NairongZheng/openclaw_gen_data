@@ -73,15 +73,13 @@ If the task cannot be completed due to fundamental blockers (agent lacks capabil
 
 ## Output Format
 
-Always return **strict JSON** (no comments allowed):
+Always return **raw JSON only** — no markdown fences, no code blocks, no extra text before or after:
 
-```json
 {{
     "completed": false,
     "query": "Your next message as the user (only when completed=false)",
     "reason": "Brief explanation of why this is the right next step (or why the task is done)"
 }}
-```
 
 **Field rules**:
 - When `completed: false` → must include `query`

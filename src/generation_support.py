@@ -63,7 +63,7 @@ def create_llm_client(config: Dict[str, Any]) -> LLMClient:
         base_url=llm_config["base_url"],
         api_key=llm_config["api_key"],
         model=llm_config["model"],
-        temperature=llm_config.get("temperature", 0.7),
+        temperature=llm_config.get("temperature"),
         max_tokens=llm_config.get("max_tokens"),
         timeout=llm_config.get("timeout"),
         retry_attempts=llm_config.get("retry_attempts", 3),

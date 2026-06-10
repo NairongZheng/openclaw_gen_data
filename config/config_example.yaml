@@ -38,7 +38,7 @@ llm:
   base_url: "${LLM_BASE_URL:-https://your-llm-endpoint/v1}"
   api_key: "${LLM_API_KEY:-your-llm-api-key}"
   model: "${LLM_MODEL_NAME:-glm-5}"
-  temperature: 0.7
+  temperature: 0.7    # 设为 null 或删除此行则不传（Claude 等不支持 temperature 的模型需要）
   max_tokens: 36000
   timeout: 120
   retry_attempts: 3

@@ -11,6 +11,18 @@ from openai import OpenAI
 logger = logging.getLogger(__name__)
 
 
+def _strip_markdown_fence(text: str) -> str:
+    """剥除模型输出中的 markdown 代码块包裹（```json ... ``` 或 ``` ... ```）。"""
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        # 去掉首行（```json 或 ```）和末行（```）
+        start = 1
+        end = len(lines) - 1 if lines[-1].strip() == "```" else len(lines)
+        return "\n".join(lines[start:end]).strip()
+    return stripped
+
+
 def _get_thinking_extra_body(model: str, enable_thinking: bool) -> Optional[Dict[str, Any]]:
     """根据模型名称获取 thinking 配置的 extra_body 参数
 
@@ -51,7 +63,7 @@ class LLMClient:
         base_url: str,
         api_key: str,
         model: str,
-        temperature: float = 0.7,
+        temperature: Optional[float] = 0.7,
         max_tokens:  Optional[int] = None,
         timeout:  Optional[float] = None,
         retry_attempts: int = 3,
@@ -137,10 +149,11 @@ class LLMClient:
                 request_kwargs = {
                     "model": self.model,
                     "messages": messages,
-                    "temperature": self.temperature,
                     "max_tokens": self.max_tokens,
                     "response_format": {"type": "json_object"},
                 }
+                if self.temperature is not None:
+                    request_kwargs["temperature"] = self.temperature
                 if extra_body is not None:
                     request_kwargs["extra_body"] = extra_body
 
@@ -157,7 +170,7 @@ class LLMClient:
                 if not content:
                     raise ValueError("LLM 返回空响应内容")
 
-                result = json.loads(content)
+                result = json.loads(_strip_markdown_fence(content))
                 logger.info(
                     "LLM decision: completed=%s (attempt %s/%s)",
                     result.get("completed", False),
