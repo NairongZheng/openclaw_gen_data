@@ -15,7 +15,7 @@ on:
       openclaw_version:
         description: OpenClaw version to install in the image
         required: true
-        default: 2026.3.24
+        default: 2026.6.1
       push_arm64:
         description: Push arm64 image
         required: true
@@ -31,28 +31,13 @@ jobs:
   build-check:
     if: github.event_name == 'pull_request' || github.event_name == 'push'
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-
-      - name: Build arm64 check image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./Dockerfile
-          platforms: linux/arm64
-          push: false
-          tags: local/openclaw-gen-data:pr-arm64
-          build-args: |
-            OPENCLAW_VERSION=2026.3.24
-          cache-from: type=gha,scope=pr-arm64
-          cache-to: type=gha,mode=max,scope=pr-arm64
 
       - name: Build amd64 check image
         uses: docker/build-push-action@v6
@@ -63,13 +48,14 @@ jobs:
           push: false
           tags: local/openclaw-gen-data:pr-amd64
           build-args: |
-            OPENCLAW_VERSION=2026.3.24
+            OPENCLAW_VERSION=${{ vars.OPENCLAW_VERSION || '2026.6.1' }}
           cache-from: type=gha,scope=pr-amd64
           cache-to: type=gha,mode=max,scope=pr-amd64
 
   publish-aliyun-arm64:
     if: github.event_name == 'workflow_dispatch' && inputs.push_arm64
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     permissions:
       contents: read
 
@@ -130,6 +116,7 @@ jobs:
   publish-aliyun-amd64:
     if: github.event_name == 'workflow_dispatch' && inputs.push_amd64
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     permissions:
       contents: read
 

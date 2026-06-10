@@ -16,7 +16,7 @@ variables:
     value: "manual"
     description: "发布 tag 前缀；最终会拼成 IMAGE_TAG-分支名-架构"
   OPENCLAW_VERSION:
-    value: "2026.3.24"
+    value: "2026.6.1"
     description: "Dockerfile 中安装的 OpenClaw 版本"
   PUSH_AMD64:
     value: "true"
@@ -30,14 +30,12 @@ variables:
       - "true"
       - "false"
     description: "是否发布 arm64 镜像"
-  ENABLE_ARM64_CHECK: "false"
   SECONDARY_REGISTRY: ""
   SECONDARY_IMAGE_NAME: "openclaw_datagen"
 
 default:
   before_script:
     - |-
-      #!/bin/bash
       set -euo pipefail
 
       docker version
@@ -63,7 +61,6 @@ default:
   stage: build_check
   script:
     - |-
-      #!/bin/bash
       set -euxo pipefail
 
       docker build \
@@ -73,11 +70,12 @@ default:
         -t "local/${IMAGE_NAME}:${TARGET_ARCH}-check" \
         .
 
+      docker rmi "local/${IMAGE_NAME}:${TARGET_ARCH}-check" || true
+
 .publish-template:
   stage: publish
   script:
     - |-
-      #!/bin/bash
       set -euxo pipefail
 
       if [[ -z "${REGISTRY:-}" ]]; then
@@ -114,18 +112,6 @@ build-check-amd64:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_COMMIT_BRANCH == "main"'
     - if: '$CI_COMMIT_BRANCH == "master"'
-
-build-check-arm64:
-  extends: .build-check-template
-  tags:
-    - arm64
-  variables:
-    TARGET_PLATFORM: linux/arm64
-    TARGET_ARCH: arm64
-  rules:
-    - if: '$ENABLE_ARM64_CHECK == "true" && $CI_PIPELINE_SOURCE == "merge_request_event"'
-    - if: '$ENABLE_ARM64_CHECK == "true" && $CI_COMMIT_BRANCH == "main"'
-    - if: '$ENABLE_ARM64_CHECK == "true" && $CI_COMMIT_BRANCH == "master"'
 
 publish-registry-amd64:
   extends: .publish-template
