@@ -96,14 +96,43 @@
 
 ## 快速开始
 
-下面这套流程适用于：
+选择你的运行方式：
 
-- 你已经在本机安装并初始化过 `openclaw`
-- 你希望直接在当前 Python 环境里运行，而不是通过 Docker 容器启动
+- **Docker 容器**（推荐，零本地依赖）→ 见下方 Docker 快速跑
+- **本地直接运行**（已装 openclaw + Python）→ 步骤 1-4
 
-如果你主要在容器里跑，推荐直接使用 [`scripts/start_generation_in_container.sh`](scripts/start_generation_in_container.sh)，并参考 [`docs/search-and-deployment.md`](docs/search-and-deployment.md)。
+### Docker 快速跑
 
-### 1. 安装依赖
+```bash
+# 构建镜像（amd64）
+docker buildx build --platform linux/amd64 -t openclaw-gen-data:amd64 --load .
+
+# 运行
+docker run --rm -it \
+  -v /path/to/config.yaml:/tmp/config.yaml:ro \
+  -v /path/to/intents.jsonl:/tmp/intents.jsonl:ro \
+  -v /path/to/output:/tmp/output \
+  -e CONFIG_PATH=/tmp/config.yaml \
+  -e OUTPUT_DIR=/tmp/output \
+  -e INTENTS_FILE=/tmp/intents.jsonl \
+  -e CONCURRENT_NUM=3 \
+  -e OPENCLAW_MODEL_URL=https://your-model-endpoint/v1 \
+  -e OPENCLAW_MODEL_API_KEY=sk-xxx \
+  -e OPENCLAW_MODEL_NAME=your-model \
+  -e LLM_BASE_URL=https://your-model-endpoint/v1 \
+  -e LLM_API_KEY=sk-xxx \
+  -e LLM_MODEL_NAME=your-model \
+  openclaw-gen-data:amd64 \
+  /workspace/scripts/start_generation_in_container.sh
+```
+
+> 详细说明（CI 流程、Serper 搜索、arm64 构建）见 [`docs/search-and-deployment.md`](docs/search-and-deployment.md)。
+
+---
+
+### 本地运行
+
+#### 1. 安装依赖
 
 ```bash
 pip install -r requirements.txt
@@ -112,7 +141,7 @@ cp config/config_example.yaml config/config.yaml
 
 > 建议在独立的虚拟环境（venv / conda）中安装，需要 Python 3.10+。
 
-### 2. 准备配置
+#### 2. 准备配置
 
 最常用的几个配置：
 
@@ -158,7 +187,7 @@ export LLM_MODEL_NAME=...
 
 这是为了避免某些长 hostname 容器里 `gateway` 因 mDNS 广播名超长而启动后立刻崩溃。
 
-### 3. 初始化 agents
+#### 3. 初始化 agents
 
 ```bash
 python scripts/init_agents.py --num-agents 4 --force-recreate --refresh-tools
@@ -171,7 +200,7 @@ python scripts/init_agents.py --num-agents 4 --force-recreate --refresh-tools
 - probe 调试快照会额外写入 `output/worker_snapshots/runtime_metadata/probe/`。
 - 更详细的工具提取说明见 [`tools/tool-inspector/README.md`](tools/tool-inspector/README.md)。
 
-### 4. 开始运行
+#### 4. 开始运行
 
 ```bash
 python scripts/run_generation.py --concurrent 4
@@ -258,6 +287,7 @@ status / session_id / source_intent_ids / messages / tools / skills / final_outp
 ## 相关文档
 
 - [`docs/project-architecture-and-introduction.md`](docs/project-architecture-and-introduction.md)：项目背景、架构、技术细节、难点与亮点的完整介绍。
+- [`docs/design-decisions.md`](docs/design-decisions.md)：关键架构决策及其取舍背景（为什么这样设计）。
 - [`docs/run-modes.md`](docs/run-modes.md)：三种运行模式、输入文件和配置语义。
 - [`docs/search-and-deployment.md`](docs/search-and-deployment.md)：搜索 provider、Serper、Docker、CI。
 - [`data_examples/`](data_examples/)：一条高质量 session 与其对应 OpenAI format 的示例。

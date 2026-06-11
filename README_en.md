@@ -96,14 +96,43 @@ Full design notes: [`docs/project-architecture-and-introduction.md`](docs/projec
 
 ## Quick Start
 
-This flow assumes:
+Choose how to run:
 
-- You already have `openclaw` installed and initialized locally.
-- You want to run directly in your current Python environment, not via a Docker container.
+- **Docker container** (recommended, zero local deps) → see Docker Quick Run below
+- **Local run** (openclaw + Python already installed) → steps 1–4
 
-If you mainly run inside a container, use [`scripts/start_generation_in_container.sh`](scripts/start_generation_in_container.sh) and see [`docs/search-and-deployment.md`](docs/search-and-deployment.md).
+### Docker Quick Run
 
-### 1. Install dependencies
+```bash
+# Build image (amd64)
+docker buildx build --platform linux/amd64 -t openclaw-gen-data:amd64 --load .
+
+# Run
+docker run --rm -it \
+  -v /path/to/config.yaml:/tmp/config.yaml:ro \
+  -v /path/to/intents.jsonl:/tmp/intents.jsonl:ro \
+  -v /path/to/output:/tmp/output \
+  -e CONFIG_PATH=/tmp/config.yaml \
+  -e OUTPUT_DIR=/tmp/output \
+  -e INTENTS_FILE=/tmp/intents.jsonl \
+  -e CONCURRENT_NUM=3 \
+  -e OPENCLAW_MODEL_URL=https://your-model-endpoint/v1 \
+  -e OPENCLAW_MODEL_API_KEY=sk-xxx \
+  -e OPENCLAW_MODEL_NAME=your-model \
+  -e LLM_BASE_URL=https://your-model-endpoint/v1 \
+  -e LLM_API_KEY=sk-xxx \
+  -e LLM_MODEL_NAME=your-model \
+  openclaw-gen-data:amd64 \
+  /workspace/scripts/start_generation_in_container.sh
+```
+
+> For more details (CI, Serper search, arm64 build), see [`docs/search-and-deployment.md`](docs/search-and-deployment.md).
+
+---
+
+### Local Run
+
+#### 1. Install dependencies
 
 ```bash
 pip install -r requirements.txt
@@ -112,7 +141,7 @@ cp config/config_example.yaml config/config.yaml
 
 > Install into an isolated virtual environment (venv / conda). Python 3.10+ is required.
 
-### 2. Prepare configuration
+#### 2. Prepare configuration
 
 The most commonly used settings:
 
@@ -156,7 +185,7 @@ If you start `openclaw gateway run` manually inside a container, make sure `~/.o
 
 This prevents `gateway` from crashing on startup in containers with very long hostnames, where the mDNS broadcast name exceeds the length limit.
 
-### 3. Initialize agents
+#### 3. Initialize agents
 
 ```bash
 python scripts/init_agents.py --num-agents 4 --force-recreate --refresh-tools
@@ -169,7 +198,7 @@ Notes:
 - Probe debug snapshots are additionally written to `output/worker_snapshots/runtime_metadata/probe/`.
 - For details on tool extraction, see [`tools/tool-inspector/README.md`](tools/tool-inspector/README.md).
 
-### 4. Run generation
+#### 4. Run generation
 
 ```bash
 python scripts/run_generation.py --concurrent 4
@@ -256,6 +285,7 @@ status / session_id / source_intent_ids / messages / tools / skills / final_outp
 ## Related Docs
 
 - [`docs/project-architecture-and-introduction.md`](docs/project-architecture-and-introduction.md): full write-up of background, architecture, technical details, hard parts, and highlights.
+- [`docs/design-decisions.md`](docs/design-decisions.md): key architectural decisions and trade-off rationale (why it's designed this way).
 - [`docs/run-modes.md`](docs/run-modes.md): the three run modes, input files, and config semantics.
 - [`docs/search-and-deployment.md`](docs/search-and-deployment.md): search providers, Serper, Docker, CI.
 - [`data_examples/`](data_examples/): one high-quality session and its corresponding OpenAI format example.
