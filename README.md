@@ -13,13 +13,10 @@
 
 </div>
 
-> **论文（Paper）:** https://arxiv.org/abs/2606.11520
->
-> **隶属项目（umbrella）:** [ISE-Trace](https://github.com/Valiere01/ISE-Trace) — *Intent → Simulate → Execute*
->
-> **上游（Stage 1，意图构造）:** https://github.com/NairongZheng/intent_creator
->
-> **数据集 ISETrace:** https://huggingface.co/datasets/valiere/ISETrace
+- 📄 **论文:** [arXiv:2606.11520](https://arxiv.org/abs/2606.11520)
+- 🛠️ **隶属项目（总入口）:** [ISE-Trace](https://github.com/Valiere01/ISE-Trace) — *Intent → Simulate → Execute*
+- 🧩 **上游（Stage 1，意图构造）:** https://github.com/NairongZheng/intent_creator
+- 🤗 **数据集 ISETrace:** https://huggingface.co/datasets/valiere/ISETrace
 
 ---
 

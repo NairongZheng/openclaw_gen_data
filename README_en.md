@@ -13,13 +13,10 @@ English · [简体中文](README.md)
 
 </div>
 
-> **Paper:** https://arxiv.org/abs/2606.11520
->
-> **Umbrella project:** [ISE-Trace](https://github.com/Valiere01/ISE-Trace) — *Intent → Simulate → Execute*
->
-> **Upstream (Stage 1, intent construction):** https://github.com/NairongZheng/intent_creator
->
-> **Dataset (ISETrace):** https://huggingface.co/datasets/valiere/ISETrace
+- 📄 **Paper:** [arXiv:2606.11520](https://arxiv.org/abs/2606.11520)
+- 🛠️ **Umbrella project:** [ISE-Trace](https://github.com/Valiere01/ISE-Trace) — *Intent → Simulate → Execute*
+- 🧩 **Upstream (Stage 1, intent construction):** https://github.com/NairongZheng/intent_creator
+- 🤗 **Dataset (ISETrace):** https://huggingface.co/datasets/valiere/ISETrace
 
 ---
 
