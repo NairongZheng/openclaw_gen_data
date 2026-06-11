@@ -13,13 +13,13 @@
 
 </div>
 
-> **论文（Paper）:** coming soon
+> **论文（Paper）:** https://arxiv.org/abs/2606.11520
 >
 > **隶属项目（umbrella）:** [ISE-Trace](https://github.com/Valiere01/ISE-Trace) — *Intent → Simulate → Execute*
 >
 > **上游（Stage 1，意图构造）:** https://github.com/NairongZheng/intent_creator
 >
-> **数据集 ISETrace:** coming soon
+> **数据集 ISETrace:** https://huggingface.co/datasets/valiere/ISETrace
 
 ---
 
@@ -269,12 +269,12 @@ status / session_id / source_intent_ids / messages / tools / skills / final_outp
 如果你使用了 ISE-Trace、ISE 范式或 ISETrace 数据集，请引用：
 
 ```bibtex
-@misc{isetrace2026,
-  title        = {From Intent to Trajectory: Execution-Grounded Multi-Turn Data Synthesis for OS Agents},
-  author       = {Valiere01},
-  year         = {2026},
-  howpublished = {\url{https://github.com/Valiere01/ISE-Trace}},
-  note         = {Paper coming soon}
+@article{isetrace2026,
+  title   = {From Intent to Trajectory: Execution-Grounded Multi-Turn Data Synthesis for OS Agents},
+  author  = {Valiere01},
+  journal = {arXiv preprint arXiv:2606.11520},
+  year    = {2026},
+  url     = {https://arxiv.org/abs/2606.11520}
 }
 ```
 

@@ -13,13 +13,13 @@ English · [简体中文](README.md)
 
 </div>
 
-> **Paper:** coming soon
+> **Paper:** https://arxiv.org/abs/2606.11520
 >
 > **Umbrella project:** [ISE-Trace](https://github.com/Valiere01/ISE-Trace) — *Intent → Simulate → Execute*
 >
 > **Upstream (Stage 1, intent construction):** https://github.com/NairongZheng/intent_creator
 >
-> **Dataset (ISETrace):** coming soon
+> **Dataset (ISETrace):** https://huggingface.co/datasets/valiere/ISETrace
 
 ---
 
@@ -267,12 +267,12 @@ status / session_id / source_intent_ids / messages / tools / skills / final_outp
 If you use ISE-Trace, the ISE paradigm, or the ISETrace dataset, please cite:
 
 ```bibtex
-@misc{isetrace2026,
-  title        = {From Intent to Trajectory: Execution-Grounded Multi-Turn Data Synthesis for OS Agents},
-  author       = {Valiere01},
-  year         = {2026},
-  howpublished = {\url{https://github.com/Valiere01/ISE-Trace}},
-  note         = {Paper coming soon}
+@article{isetrace2026,
+  title   = {From Intent to Trajectory: Execution-Grounded Multi-Turn Data Synthesis for OS Agents},
+  author  = {Valiere01},
+  journal = {arXiv preprint arXiv:2606.11520},
+  year    = {2026},
+  url     = {https://arxiv.org/abs/2606.11520}
 }
 ```
 
