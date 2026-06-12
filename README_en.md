@@ -87,7 +87,7 @@ Logically split into 6 layers:
 | Recovery | Worker snapshots, pending-session recovery, config baseline rollback, gateway restart | `src/worker_snapshot.py`, `src/agent_runtime.py`, `src/runtime_recovery.py`, `src/fs_utils.py` |
 | Conversion | Raw session → training OpenAI format | `src/session_parser.py`, `src/converter.py` |
 
-Full design notes: [`docs/project-architecture-and-introduction.md`](docs/project-architecture-and-introduction.md).
+Full design notes: [`docs/project-architecture-and-introduction_en.md`](docs/project-architecture-and-introduction_en.md).
 
 ---
 
@@ -123,7 +123,7 @@ docker run --rm -it \
   /workspace/scripts/start_generation_in_container.sh
 ```
 
-> For more details (CI, Serper search, arm64 build), see [`docs/search-and-deployment.md`](docs/search-and-deployment.md).
+> For more details (CI, Serper search, arm64 build), see [`docs/search-and-deployment_en.md`](docs/search-and-deployment_en.md).
 
 ---
 
@@ -201,7 +201,7 @@ Notes:
 python scripts/run_generation.py --concurrent 4
 ```
 
-To launch the whole flow in a container, see the Docker example in [`docs/search-and-deployment.md`](docs/search-and-deployment.md).
+To launch the whole flow in a container, see the Docker example in [`docs/search-and-deployment_en.md`](docs/search-and-deployment_en.md).
 
 ---
 
@@ -213,7 +213,7 @@ To launch the whole flow in a container, see the Docker example in [`docs/search
 | query mode | Tasks with `query`/`question`, sent directly to OpenClaw | `INTENTS_FILE`, `APPEND_QUERY_ENABLED=false` |
 | intent + finalize query | intent task + one appended query before each session finalizes | `APPEND_QUERY_ENABLED=true`, `APPEND_QUERY_FILE` |
 
-Details: [`docs/run-modes.md`](docs/run-modes.md).
+Details: [`docs/run-modes_en.md`](docs/run-modes_en.md).
 
 ---
 
@@ -281,10 +281,10 @@ status / session_id / source_intent_ids / messages / tools / skills / final_outp
 
 ## Related Docs
 
-- [`docs/project-architecture-and-introduction.md`](docs/project-architecture-and-introduction.md): full write-up of background, architecture, technical details, hard parts, and highlights.
-- [`docs/design-decisions.md`](docs/design-decisions.md): key architectural decisions and trade-off rationale (why it's designed this way).
-- [`docs/run-modes.md`](docs/run-modes.md): the three run modes, input files, and config semantics.
-- [`docs/search-and-deployment.md`](docs/search-and-deployment.md): search providers, Serper, Docker, CI.
+- [`docs/project-architecture-and-introduction_en.md`](docs/project-architecture-and-introduction_en.md): full write-up of background, architecture, technical details, hard parts, and highlights.
+- [`docs/design-decisions_en.md`](docs/design-decisions_en.md): key architectural decisions and trade-off rationale (why it's designed this way).
+- [`docs/run-modes_en.md`](docs/run-modes_en.md): the three run modes, input files, and config semantics.
+- [`docs/search-and-deployment_en.md`](docs/search-and-deployment_en.md): search providers, Serper, Docker, CI.
 - [`data_examples/`](data_examples/): one high-quality session and its corresponding OpenAI format example.
 
 ---
